@@ -1,0 +1,261 @@
+<template>
+  <div class="outline-preview">
+    <div class="meta-card">
+      <h2>{{ meta.title }}</h2>
+      <div class="meta-tags">
+        <span class="tag">{{ meta.genre }}</span>
+        <span class="tag">共 {{ meta.episodes }} 集</span>
+      </div>
+      <p class="theme">{{ meta.theme }}</p>
+    </div>
+
+    <div class="section">
+      <h3>主要角色 <span class="hint-text">双击可编辑</span></h3>
+      <div class="characters">
+        <div
+          v-for="c in characters"
+          :key="c.name"
+          class="char-card"
+          :class="{ editing: editingChar === c.name }"
+          @dblclick="startEditChar(c)"
+        >
+          <template v-if="editingChar === c.name">
+            <div class="char-edit-row">
+              <span class="char-name-static">{{ c.name }}</span>
+              <span class="char-role">{{ c.role }}</span>
+            </div>
+            <textarea v-model="editCharDesc" class="edit-char-desc" rows="2" @keydown.esc="cancelEditChar" />
+            <div class="edit-actions">
+              <button class="save-btn" @click="saveEditChar(c.name)">保存</button>
+              <button class="cancel-btn" @click="cancelEditChar">取消</button>
+            </div>
+          </template>
+          <template v-else>
+            <div class="char-name">{{ c.name }} <span class="char-role">{{ c.role }}</span></div>
+            <div class="char-desc">{{ c.description }}</div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>剧情大纲 <span class="hint-text">双击可编辑</span></h3>
+      <div class="outline-list">
+        <div
+          v-for="ep in outline"
+          :key="ep.episode"
+          class="ep-item"
+          :class="{ editing: editingEp === ep.episode }"
+          @dblclick="startEdit(ep)"
+        >
+          <div class="ep-num">第 {{ ep.episode }} 集</div>
+          <div class="ep-content">
+            <template v-if="editingEp === ep.episode">
+              <input v-model="editTitle" class="edit-title" @keydown.enter="saveEdit" @keydown.esc="cancelEdit" />
+              <textarea v-model="editSummary" class="edit-summary" rows="3" @keydown.esc="cancelEdit" />
+              <div class="edit-actions">
+                <button class="save-btn" @click="saveEdit">保存</button>
+                <button class="cancel-btn" @click="cancelEdit">取消</button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="ep-title">{{ ep.title }}</div>
+              <div class="ep-summary">{{ ep.summary }}</div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { useStoryStore } from '../stores/story.js'
+import { refineStory } from '../api/story.js'
+
+defineProps({ meta: Object, characters: Array, outline: Array })
+
+const store = useStoryStore()
+const editingEp = ref(null)
+const editTitle = ref('')
+const editSummary = ref('')
+const editingChar = ref(null)
+const editCharDesc = ref('')
+
+function startEdit(ep) {
+  editingEp.value = ep.episode
+  editTitle.value = ep.title
+  editSummary.value = ep.summary
+}
+
+function saveEdit() {
+  const ep = store.outline.find(e => e.episode === editingEp.value)
+  const oldSummary = ep ? ep.summary : ''
+  const epNum = editingEp.value
+  store.updateOutlineEpisode(epNum, editTitle.value, editSummary.value)
+  editingEp.value = null
+  refineStory(store.storyId, 'episode', `第${epNum}集剧情从「${oldSummary}」改为「${editSummary.value}」`)
+    .then(res => { if (res) store.applyRefine(res) })
+}
+
+function cancelEdit() {
+  editingEp.value = null
+}
+
+function startEditChar(c) {
+  editingChar.value = c.name
+  editCharDesc.value = c.description
+}
+
+function saveEditChar(name) {
+  const c = store.characters.find(ch => ch.name === name)
+  const oldDesc = c ? c.description : ''
+  store.updateCharacter(name, editCharDesc.value)
+  editingChar.value = null
+  refineStory(store.storyId, 'character', `角色「${name}」描述从「${oldDesc}」改为「${editCharDesc.value}」`)
+    .then(res => { if (res) store.applyRefine(res) })
+}
+
+function cancelEditChar() {
+  editingChar.value = null
+}
+</script>
+
+<style scoped>
+.outline-preview { display: flex; flex-direction: column; gap: 20px; }
+.meta-card {
+  background: linear-gradient(135deg, #6c63ff, #a78bfa);
+  color: #fff;
+  border-radius: 16px;
+  padding: 20px;
+}
+.meta-card h2 { font-size: 22px; margin-bottom: 10px; }
+.meta-tags { display: flex; gap: 8px; margin-bottom: 10px; }
+.tag {
+  background: rgba(255,255,255,0.2);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+}
+.theme { font-size: 14px; opacity: 0.9; line-height: 1.6; }
+.section h3 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #333; display: flex; align-items: center; gap: 8px; }
+.hint-text { font-size: 11px; color: #bbb; font-weight: 400; }
+.characters { display: flex; flex-direction: column; gap: 10px; }
+.char-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px 16px;
+  border-left: 4px solid #6c63ff;
+  cursor: pointer;
+  transition: box-shadow 0.2s, border-color 0.2s;
+  border: 2px solid transparent;
+  border-left: 4px solid #6c63ff;
+}
+.char-card:hover { box-shadow: 0 2px 10px rgba(108,99,255,0.1); }
+.char-card.editing { border-color: #6c63ff; box-shadow: 0 0 0 3px rgba(108,99,255,0.1); cursor: default; }
+.char-edit-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.char-name-static { font-weight: 600; font-size: 15px; white-space: nowrap; }
+.edit-char-role {
+  font-size: 12px;
+  border: 1.5px solid #6c63ff;
+  border-radius: 10px;
+  padding: 2px 8px;
+  color: #6c63ff;
+  font-family: inherit;
+  outline: none;
+  width: 100px;
+}
+.edit-char-desc {
+  width: 100%;
+  font-size: 13px;
+  color: #444;
+  border: 1.5px solid #d0c8ff;
+  border-radius: 6px;
+  padding: 6px 8px;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.5;
+  outline: none;
+}
+.edit-char-desc:focus { border-color: #6c63ff; }
+.char-name { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+.char-role {
+  font-size: 12px;
+  color: #6c63ff;
+  background: #f0eeff;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: 8px;
+  font-weight: 400;
+}
+.char-desc { font-size: 13px; color: #666; }
+.outline-list { display: flex; flex-direction: column; gap: 8px; }
+.ep-item {
+  display: flex;
+  gap: 12px;
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: box-shadow 0.2s, border-color 0.2s;
+  border: 2px solid transparent;
+}
+.ep-item:hover { box-shadow: 0 2px 10px rgba(108,99,255,0.1); border-color: #e0d9ff; }
+.ep-item.editing { border-color: #6c63ff; box-shadow: 0 0 0 3px rgba(108,99,255,0.1); cursor: default; }
+.ep-num {
+  font-size: 12px;
+  color: #6c63ff;
+  font-weight: 600;
+  white-space: nowrap;
+  padding-top: 2px;
+}
+.ep-content { flex: 1; min-width: 0; }
+.ep-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.ep-summary { font-size: 13px; color: #666; line-height: 1.5; }
+.edit-title {
+  width: 100%;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1.5px solid #6c63ff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  font-family: inherit;
+  outline: none;
+}
+.edit-summary {
+  width: 100%;
+  font-size: 13px;
+  color: #444;
+  border: 1.5px solid #d0c8ff;
+  border-radius: 6px;
+  padding: 6px 8px;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.5;
+  outline: none;
+}
+.edit-summary:focus, .edit-title:focus { border-color: #6c63ff; }
+.edit-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+.save-btn {
+  padding: 5px 14px;
+  background: #6c63ff;
+  color: #fff;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.save-btn:hover { background: #5a52e0; }
+.cancel-btn {
+  padding: 5px 14px;
+  background: #fff;
+  color: #888;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cancel-btn:hover { border-color: #aaa; }
+</style>
