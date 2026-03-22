@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import re
 import time
 import httpx
 from pathlib import Path
@@ -92,7 +93,9 @@ async def generate_character_image(
     # Generate unique filename
     hash_input = f"{story_id}_{character_name}_{time.time()}"
     file_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
-    safe_name = character_name.replace(" ", "_").replace("/", "_")
+    safe_name = re.sub(r'[^A-Za-z0-9_-]', '_', character_name)
+    safe_name = re.sub(r'_+', '_', safe_name).strip('_') or 'character'
+    safe_name = safe_name[:64]
     filename = f"{story_id}_{safe_name}_{file_hash}.png"
 
     output_path = CHARACTER_DIR / filename
