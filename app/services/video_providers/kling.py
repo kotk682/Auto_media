@@ -23,6 +23,10 @@ class KlingVideoProvider(BaseVideoProvider):
         if ":" not in api_key:
             raise ValueError("Kling API Key 格式应为 access_key_id:access_key_secret")
         access_key_id, secret_key = api_key.split(":", 1)
+        access_key_id = access_key_id.strip()
+        secret_key = secret_key.strip()
+        if not access_key_id or not secret_key:
+            raise ValueError("Kling API Key 格式应为 access_key_id:access_key_secret 且 AK/SK 不可为空")
         payload = {
             "iss": access_key_id,
             "exp": int(time.time()) + 1800,
@@ -54,7 +58,15 @@ class KlingVideoProvider(BaseVideoProvider):
         print(f"[VIDEO KLING SUBMIT] status={resp.status_code} base={base_url}")
         if not resp.is_success:
             raise RuntimeError(f"Kling 视频任务提交错误 {resp.status_code}: {resp.text[:200]}")
-        return resp.json()["data"]["task_id"]
+        try:
+            body = resp.json()
+        except Exception as e:
+            raise RuntimeError(f"Kling 提交响应 JSON 解析失败: {e!r} | 原始响应: {resp.text[:200]}") from e
+        data = body.get("data") if isinstance(body, dict) else None
+        task_id = data.get("task_id") if isinstance(data, dict) else None
+        if not task_id:
+            raise RuntimeError(f"Kling 提交响应缺少 task_id: {resp.text[:200]}")
+        return task_id
 
     async def _poll(self, client: httpx.AsyncClient, task_id: str, token: str, base_url: str, timeout: int = 300) -> str:
         url = f"{base_url}{_POLL_PATH.format(task_id=task_id)}"

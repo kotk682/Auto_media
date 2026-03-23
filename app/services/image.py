@@ -4,6 +4,7 @@ import re
 import time
 import httpx
 from pathlib import Path
+from fastapi import HTTPException
 
 from app.core.config import settings
 from app.core.api_keys import mask_key
@@ -23,7 +24,7 @@ async def generate_image(visual_prompt: str, shot_id: str, model: str = DEFAULT_
     """Generate image for a single shot. Returns { shot_id, image_path, image_url }."""
     base_url = image_base_url or settings.siliconflow_base_url
     if image_base_url and not image_api_key:
-        raise ValueError("提供自定义 image_base_url 时必须同时提供 image_api_key")
+        raise HTTPException(status_code=400, detail="提供自定义 image_base_url 时必须同时提供 image_api_key")
     image_api_key = image_api_key or settings.siliconflow_api_key
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
@@ -79,7 +80,7 @@ async def generate_character_image(
     prompt = _build_character_prompt(character_name, role, description)
     base_url = image_base_url or settings.siliconflow_base_url
     if image_base_url and not image_api_key:
-        raise ValueError("提供自定义 image_base_url 时必须同时提供 image_api_key")
+        raise HTTPException(status_code=400, detail="提供自定义 image_base_url 时必须同时提供 image_api_key")
     image_api_key = image_api_key or settings.siliconflow_api_key
 
     async with httpx.AsyncClient(timeout=120) as client:
