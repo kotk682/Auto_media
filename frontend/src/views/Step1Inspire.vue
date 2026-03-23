@@ -37,7 +37,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import StepIndicator from '../components/StepIndicator.vue'
 import ApiKeyModal from '../components/ApiKeyModal.vue'
@@ -49,6 +49,9 @@ import { worldBuildingStart } from '../api/story.js'
 const router = useRouter()
 const store = useStoryStore()
 const settings = useSettingsStore()
+
+const isMounted = ref(true)
+onUnmounted(() => { isMounted.value = false })
 
 const idea = ref('')
 const loading = ref(false)
@@ -67,13 +70,14 @@ function isAuthError(msg) {
 }
 
 async function submit() {
-  if (!settings.useMock && !settings.apiKey) { showKeyModal.value = true; return }
+  if (!settings.useMock && !settings.llmApiKey) { showKeyModal.value = true; return }
   loading.value = true
   error.value = ''
   try {
     store.setInput(idea.value, '', '')
     const result = await worldBuildingStart(idea.value)
     store.setWorldBuildingStart(result)
+    if (!isMounted.value) return
     store.setStep(2)
     router.push('/step2')
   } catch (e) {

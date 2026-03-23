@@ -159,7 +159,13 @@ async def mock_analyze_idea(idea: str, genre: str, tone: str, db: AsyncSession =
 async def mock_generate_outline(story_id: str, selected_setting: str, db: AsyncSession = None) -> dict:
     await asyncio.sleep(0.5)
     if db:
-        await repo.save_story(db, story_id, {"selected_setting": selected_setting, "outline": MOCK_OUTLINE["outline"]})
+        await repo.save_story(db, story_id, {
+            "selected_setting": selected_setting,
+            "meta": MOCK_OUTLINE["meta"],
+            "characters": MOCK_OUTLINE["characters"],
+            "relationships": MOCK_OUTLINE["relationships"],
+            "outline": MOCK_OUTLINE["outline"],
+        })
     return {"story_id": story_id, **MOCK_OUTLINE}
 
 

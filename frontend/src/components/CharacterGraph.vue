@@ -6,15 +6,19 @@
         <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
           <path d="M0,0 L0,6 L8,3 z" fill="#a78bfa" />
         </marker>
+        <marker id="arrow-start" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto-start-reverse">
+          <path d="M0,0 L0,6 L8,3 z" fill="#a78bfa" />
+        </marker>
       </defs>
 
       <!-- 连线 + 标签 -->
-      <g v-for="(rel, i) in relationships" :key="i">
+      <g v-for="(rel, i) in displayRelationships" :key="i">
         <line
           :x1="edgePos(rel).x1" :y1="edgePos(rel).y1"
           :x2="edgePos(rel).x2" :y2="edgePos(rel).y2"
           class="edge"
           marker-end="url(#arrow)"
+          :marker-start="rel.bidirectional ? 'url(#arrow-start)' : ''"
         />
         <rect
           :x="(edgePos(rel).x1 + edgePos(rel).x2) / 2 - labelWidth(rel.label) / 2"
@@ -72,6 +76,20 @@ const positions = computed(() => {
   })
 })
 
+const displayRelationships = computed(() => {
+  const rels = props.relationships
+  const seen = new Set()
+  return rels.map(rel => {
+    const bidirectional = rels.some(r => r.source === rel.target && r.target === rel.source)
+    return { ...rel, bidirectional }
+  }).filter(rel => {
+    const key = [rel.source, rel.target].sort().join('\0')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+})
+
 function pos(name) {
   const i = props.characters.findIndex(c => c.name === name)
   return i >= 0 ? positions.value[i] : { x: CX.value, y: CY.value }
@@ -86,9 +104,10 @@ function edgePos(rel) {
   const ux = dx / dist
   const uy = dy / dist
   const nr = NODE_R.value
+  const startGap = rel.bidirectional ? nr + 10 : nr + 2
   return {
-    x1: s.x + ux * (nr + 2),
-    y1: s.y + uy * (nr + 2),
+    x1: s.x + ux * startGap,
+    y1: s.y + uy * startGap,
     x2: t.x - ux * (nr + 10),
     y2: t.y - uy * (nr + 10),
   }

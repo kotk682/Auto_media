@@ -64,7 +64,7 @@ function clearInput() {
 }
 
 async function sendToAI() {
-  if (!settings.useMock && !settings.apiKey) { chatError.value = '请先在设置页填入 API Key'; return }
+  if (!settings.useMock && !settings.llmApiKey) { chatError.value = '请先在设置页填入 API Key'; return }
   chatLoading.value = true
   chatError.value = ''
   const userMsg = customText.value

@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Body, Depe
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.config import settings as _cfg
-from app.core.api_keys import extract_api_keys, resolve_image_key, resolve_video_key, image_config_dep, video_config_dep, llm_config_dep
+from app.core.api_keys import extract_api_keys, resolve_image_key, image_config_dep, video_config_dep, llm_config_dep, validate_user_base_url
 from app.schemas.pipeline import (
     PipelineStatusResponse,
     PipelineStatus,
@@ -55,14 +55,19 @@ async def auto_generate(
     pipeline_id = str(uuid4())
 
     # 在请求上下文中提取 API Key（header 优先，回退到请求体字段）
-    # resolve_image_key / resolve_video_key 会在此处提前校验并回退 .env，确保三段式统一
     keys = extract_api_keys(request)
     llm_api_key  = keys.llm_api_key  or req.llm_api_key  or ""
     llm_base_url = keys.llm_base_url or req.llm_base_url or ""
     image_api_key = resolve_image_key(keys.image_api_key or req.image_api_key or "")
-    image_base_url = keys.image_base_url or _cfg.siliconflow_base_url
-    video_api_key = resolve_video_key(keys.video_api_key or req.video_api_key or "")
-    video_base_url = keys.video_base_url or _cfg.dashscope_base_url
+    validated_image_base_url = validate_user_base_url(keys.image_base_url)
+    if validated_image_base_url and not keys.image_api_key:
+        raise HTTPException(status_code=400, detail="使用自定义 X-Image-Base-URL 时必须同时提供 X-Image-API-Key")
+    image_base_url = validated_image_base_url or _cfg.siliconflow_base_url
+
+    video_cfg = video_config_dep(request)
+    video_api_key = video_cfg["video_api_key"]
+    video_base_url = video_cfg["video_base_url"]
+    video_provider = video_cfg["video_provider"]
 
     async def _run_pipeline():
         """后台执行流水线"""
@@ -94,6 +99,7 @@ async def auto_generate(
                 image_base_url=image_base_url,
                 video_api_key=video_api_key,
                 video_base_url=video_base_url,
+                video_provider=video_provider,
             )
 
     background_tasks.add_task(_run_pipeline)
