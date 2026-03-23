@@ -38,6 +38,7 @@ class PipelineExecutor:
         image_base_url: str = "",
         video_api_key: str = "",
         video_base_url: str = "",
+        video_provider: str = "dashscope",
     ):
         """执行完整的生成流水线"""
         try:
@@ -67,11 +68,11 @@ class PipelineExecutor:
             # 根据策略执行
             if strategy == GenerationStrategy.SEPARATED:
                 await self._run_separated_strategy(
-                    voice, image_model, video_model, base_url, image_api_key, image_base_url, video_api_key, video_base_url
+                    voice, image_model, video_model, base_url, image_api_key, image_base_url, video_api_key, video_base_url, video_provider
                 )
             else:
                 await self._run_integrated_strategy(
-                    image_model, video_model, base_url, image_api_key, image_base_url, video_api_key, video_base_url
+                    image_model, video_model, base_url, image_api_key, image_base_url, video_api_key, video_base_url, video_provider
                 )
 
             # Step 5: FFmpeg 合成（仅分离策略需要）
@@ -100,6 +101,7 @@ class PipelineExecutor:
         image_base_url: str = "",
         video_api_key: str = "",
         video_base_url: str = "",
+        video_provider: str = "dashscope",
     ):
         """
         策略 A: 分离式
@@ -179,6 +181,7 @@ class PipelineExecutor:
             model=video_model,
             video_api_key=video_api_key,
             video_base_url=video_base_url,
+            video_provider=video_provider,
         )
         video_map = {r["shot_id"]: r for r in video_results}
 
@@ -209,6 +212,7 @@ class PipelineExecutor:
         image_base_url: str = "",
         video_api_key: str = "",
         video_base_url: str = "",
+        video_provider: str = "dashscope",
     ):
         """
         策略 B: 一体式
@@ -267,6 +271,7 @@ class PipelineExecutor:
             model=video_model,
             video_api_key=video_api_key,
             video_base_url=video_base_url,
+            video_provider=video_provider,
         )
         video_map = {r["shot_id"]: r for r in video_results}
 

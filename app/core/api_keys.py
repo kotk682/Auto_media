@@ -27,6 +27,7 @@ class ApiKeyBundle:
     image_base_url: str
     video_api_key: str
     video_base_url: str
+    video_provider: str
 
 
 def extract_api_keys(request: Request) -> ApiKeyBundle:
@@ -40,6 +41,7 @@ def extract_api_keys(request: Request) -> ApiKeyBundle:
         image_base_url=request.headers.get("X-Image-Base-URL", ""),
         video_api_key=request.headers.get("X-Video-API-Key", ""),
         video_base_url=request.headers.get("X-Video-Base-URL", ""),
+        video_provider=request.headers.get("X-Video-Provider", ""),
     )
 
 
@@ -144,7 +146,8 @@ _PROVIDER_CONFIG: dict[str, tuple[str, str]] = {
     "openai": ("openai_api_key",    "openai_base_url"),
     "qwen":   ("qwen_api_key",      "qwen_base_url"),
     "zhipu":  ("zhipu_api_key",     "zhipu_base_url"),
-    "gemini": ("gemini_api_key",    "gemini_base_url"),
+    "gemini":      ("gemini_api_key",      "gemini_base_url"),
+    "siliconflow": ("siliconflow_api_key", "siliconflow_base_url"),
 }
 
 
@@ -217,20 +220,33 @@ def video_key_dep(request: Request) -> str:
 
 
 def video_config_dep(request: Request) -> dict:
-    """Depends：提取视频生成配置（api_key / base_url），返回 dict 供 ** 解构。"""
+    """Depends：提取视频生成配置（api_key / base_url / provider），返回 dict 供 ** 解构。"""
     keys = extract_api_keys(request)
+    video_provider = keys.video_provider or "dashscope"
     validated_base_url = validate_user_base_url(keys.video_base_url)
+
     if validated_base_url:
         if not keys.video_api_key:
             raise HTTPException(
                 status_code=400,
                 detail="使用自定义 X-Video-Base-URL 时必须同时提供 X-Video-API-Key",
             )
-        return {"video_api_key": keys.video_api_key, "video_base_url": validated_base_url}
-    return {
-        "video_api_key": resolve_video_key(keys.video_api_key),
-        "video_base_url": _cfg.dashscope_base_url,
-    }
+        return {"video_api_key": keys.video_api_key, "video_base_url": validated_base_url, "video_provider": video_provider}
+
+    # Provider-specific .env fallback
+    if video_provider == "kling":
+        api_key = keys.video_api_key or _cfg.kling_api_key
+        base_url = _cfg.kling_base_url
+    else:  # dashscope (default)
+        api_key = keys.video_api_key or _cfg.dashscope_api_key
+        base_url = _cfg.dashscope_base_url
+
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail=f"视频生成 API Key 未配置 (provider={video_provider})，请在设置页填写或在 .env 中配置对应 Key",
+        )
+    return {"video_api_key": api_key, "video_base_url": base_url, "video_provider": video_provider}
 
 
 def llm_config_dep(request: Request) -> dict:
