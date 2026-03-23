@@ -67,7 +67,7 @@ function isAuthError(msg) {
 }
 
 async function submit() {
-  if (!settings.useMock && !settings.apiKey) { showKeyModal.value = true; return }
+  if (!settings.useMock && !settings.llmApiKey) { showKeyModal.value = true; return }
   loading.value = true
   error.value = ''
   try {

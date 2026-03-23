@@ -12,7 +12,6 @@
     <div class="section">
       <div class="section-header">
         <h3>主要角色 <span class="hint-text">双击可编辑</span></h3>
-        <button class="ai-btn" @click="openCharacterChat(null)">✦ AI 助手</button>
       </div>
       <div class="characters">
         <div
@@ -183,18 +182,6 @@ function openEpisodeChat(episode) {
 }
 .section h3 { font-size: 16px; font-weight: 600; color: #333; display: flex; align-items: center; gap: 8px; }
 .hint-text { font-size: 11px; color: #bbb; font-weight: 400; }
-.ai-btn {
-  padding: 6px 14px;
-  background: linear-gradient(135deg, #6c63ff, #a78bfa);
-  color: #fff;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: opacity 0.2s;
-}
-.ai-btn:hover { opacity: 0.85; }
 .characters { display: flex; flex-direction: column; gap: 10px; }
 .char-card {
   background: #fff;

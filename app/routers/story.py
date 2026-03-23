@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.schemas.story import AnalyzeIdeaRequest, GenerateOutlineRequest, GenerateScriptRequest, ChatRequest, RefineRequest, WorldBuildingStartRequest, WorldBuildingTurnRequest
-from app.services.story_llm import analyze_idea, generate_outline, generate_script, chat, refine, world_building_start, world_building_turn
+from app.schemas.story import AnalyzeIdeaRequest, GenerateOutlineRequest, GenerateScriptRequest, ChatRequest, RefineRequest, WorldBuildingStartRequest, WorldBuildingTurnRequest, PatchStoryRequest, ApplyChatRequest
+from app.services.story_llm import analyze_idea, generate_outline, generate_script, chat, refine, world_building_start, world_building_turn, apply_chat
 from app.services import story_repository as repo
 from app.core.api_keys import llm_config_dep
 
@@ -56,6 +56,26 @@ async def api_generate_script(req: GenerateScriptRequest, llm: dict = Depends(ll
 @router.post("/refine")
 async def api_refine(req: RefineRequest, llm: dict = Depends(llm_config_dep), db: AsyncSession = Depends(get_db)):
     return await refine(req.story_id, req.change_type, req.change_summary, db=db, **llm)
+
+
+@router.post("/patch")
+async def api_patch(req: PatchStoryRequest, db: AsyncSession = Depends(get_db)):
+    fields = {}
+    if req.characters is not None:
+        fields["characters"] = req.characters
+    if req.outline is not None:
+        fields["outline"] = req.outline
+    if fields:
+        await repo.save_story(db, req.story_id, fields)
+    return {"ok": True}
+
+
+@router.post("/apply-chat")
+async def api_apply_chat(req: ApplyChatRequest, llm: dict = Depends(llm_config_dep), db: AsyncSession = Depends(get_db)):
+    return await apply_chat(
+        req.story_id, req.change_type, req.chat_history, req.current_item, db=db,
+        all_characters=req.all_characters, all_outline=req.all_outline, **llm
+    )
 
 
 @router.post("/world-building/start")

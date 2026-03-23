@@ -7,7 +7,6 @@
           <h1>剧本生成</h1>
           <p class="subtitle">确认大纲后开始生成完整剧本</p>
         </div>
-        <button class="chat-toggle-btn" @click="chatOpen = true">✦ AI 修改助手</button>
       </div>
 
       <div class="top-row">
@@ -123,18 +122,6 @@ async function startGenerate() {
 .title-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
 h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
 .subtitle { color: #888; }
-.chat-toggle-btn {
-  padding: 10px 18px;
-  background: linear-gradient(135deg, #6c63ff, #a78bfa);
-  color: #fff;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: opacity 0.2s;
-}
-.chat-toggle-btn:hover { opacity: 0.9; }
 .top-row { display: flex; gap: 16px; align-items: flex-start; }
 .outline-col { flex: 1; min-width: 0; }
 .graph-col { width: 380px; flex-shrink: 0; position: sticky; top: 24px; }

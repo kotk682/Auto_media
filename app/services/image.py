@@ -22,6 +22,7 @@ CHARACTER_SIZE = "1024x1024"
 async def generate_image(visual_prompt: str, shot_id: str, model: str = DEFAULT_MODEL, image_api_key: str = "", image_base_url: str = "") -> dict:
     """Generate image for a single shot. Returns { shot_id, image_path, image_url }."""
     base_url = image_base_url or settings.siliconflow_base_url
+    image_api_key = image_api_key or settings.siliconflow_api_key
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
             f"{base_url}/images/generations",
@@ -75,6 +76,7 @@ async def generate_character_image(
     """Generate character design image. Returns { character_name, image_path, image_url, prompt }."""
     prompt = _build_character_prompt(character_name, role, description)
     base_url = image_base_url or settings.siliconflow_base_url
+    image_api_key = image_api_key or settings.siliconflow_api_key
 
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(
@@ -93,12 +95,19 @@ async def generate_character_image(
     # Generate unique filename
     hash_input = f"{story_id}_{character_name}_{time.time()}"
     file_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
+    safe_story_id = re.sub(r'[^A-Za-z0-9_-]', '_', story_id)
+    safe_story_id = re.sub(r'_+', '_', safe_story_id).strip('_') or 'story'
+    safe_story_id = safe_story_id[:64]
     safe_name = re.sub(r'[^A-Za-z0-9_-]', '_', character_name)
     safe_name = re.sub(r'_+', '_', safe_name).strip('_') or 'character'
     safe_name = safe_name[:64]
-    filename = f"{story_id}_{safe_name}_{file_hash}.png"
+    filename = f"{safe_story_id}_{safe_name}_{file_hash}.png"
 
     output_path = CHARACTER_DIR / filename
+    try:
+        output_path.resolve().relative_to(CHARACTER_DIR.resolve())
+    except ValueError:
+        raise ValueError(f"Unsafe output path detected: {output_path}")
     output_path.write_bytes(img_resp.content)
 
     return {

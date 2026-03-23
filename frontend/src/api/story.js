@@ -8,12 +8,15 @@ import { useSettingsStore } from '../stores/settings.js'
 function getHeaders() {
   const settings = useSettingsStore()
   const headers = { 'Content-Type': 'application/json' }
-  if (settings.effectiveLlmApiKey)   headers['X-LLM-API-Key']    = settings.effectiveLlmApiKey
-  if (settings.effectiveLlmBaseUrl)  headers['X-LLM-Base-URL']   = settings.effectiveLlmBaseUrl
-  if (settings.effectiveLlmProvider) headers['X-LLM-Provider']   = settings.effectiveLlmProvider
-  if (settings.effectiveLlmModel)    headers['X-LLM-Model']      = settings.effectiveLlmModel
+  if (!settings.useMock) {
+    if (settings.effectiveLlmApiKey)   headers['X-LLM-API-Key']    = settings.effectiveLlmApiKey
+    if (settings.effectiveLlmBaseUrl)  headers['X-LLM-Base-URL']   = settings.effectiveLlmBaseUrl
+    if (settings.effectiveLlmProvider) headers['X-LLM-Provider']   = settings.effectiveLlmProvider
+    if (settings.effectiveLlmModel)    headers['X-LLM-Model']      = settings.effectiveLlmModel
+  }
   if (settings.effectiveImageApiKey)  headers['X-Image-API-Key']  = settings.effectiveImageApiKey
   if (settings.effectiveImageBaseUrl) headers['X-Image-Base-URL'] = settings.effectiveImageBaseUrl
+  if (settings.effectiveVideoProvider) headers['X-Video-Provider'] = settings.effectiveVideoProvider
   if (settings.effectiveVideoApiKey)  headers['X-Video-API-Key']  = settings.effectiveVideoApiKey
   if (settings.effectiveVideoBaseUrl) headers['X-Video-Base-URL'] = settings.effectiveVideoBaseUrl
   return headers
@@ -98,6 +101,33 @@ export async function refineStory(storyId, changeType, changeSummary) {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify({ story_id: storyId, change_type: changeType, change_summary: changeSummary }),
+  })
+  if (!res.ok) return null
+  return res.json()
+}
+
+export async function patchStory(storyId, fields) {
+  const res = await fetch(getUrl('/patch'), {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ story_id: storyId, ...fields }),
+  })
+  if (!res.ok) return null
+  return res.json()
+}
+
+export async function applyChatChanges(storyId, changeType, chatHistory, currentItem, allCharacters, allOutline) {
+  const res = await fetch(getUrl('/apply-chat'), {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({
+      story_id: storyId,
+      change_type: changeType,
+      chat_history: chatHistory,
+      current_item: currentItem,
+      all_characters: allCharacters ?? null,
+      all_outline: allOutline ?? null,
+    }),
   })
   if (!res.ok) return null
   return res.json()

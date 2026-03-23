@@ -64,7 +64,8 @@ export const useStoryStore = defineStore('story', {
       const c = this.characters.find(c => c.name === name)
       if (c) { c.description = description }
     },
-    applyRefine({ relationships, outline, meta_theme, usage }) {
+    applyRefine({ characters, relationships, outline, meta_theme, usage }) {
+      if (characters) this.characters = characters
       if (relationships) this.relationships = relationships
       if (outline) this.outline = outline
       if (meta_theme && this.meta) this.meta.theme = meta_theme

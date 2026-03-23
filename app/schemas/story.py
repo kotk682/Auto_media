@@ -60,6 +60,21 @@ class GenerateScriptRequest(BaseModel):
     story_id: str
 
 
+class PatchStoryRequest(BaseModel):
+    story_id: str
+    characters: Optional[List[dict]] = None
+    outline: Optional[List[dict]] = None
+
+
+class ApplyChatRequest(BaseModel):
+    story_id: str
+    change_type: str          # "character" | "episode"
+    chat_history: List[dict]  # [{role: "user"|"ai", text: "..."}]
+    current_item: dict        # current character or episode object
+    all_characters: Optional[List[dict]] = None   # full characters array from store
+    all_outline: Optional[List[dict]] = None      # full outline array from store
+
+
 class RefineRequest(BaseModel):
     story_id: str
     change_type: str  # "character" | "episode"
