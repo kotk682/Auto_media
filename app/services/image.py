@@ -22,6 +22,8 @@ CHARACTER_SIZE = "1024x1024"
 async def generate_image(visual_prompt: str, shot_id: str, model: str = DEFAULT_MODEL, image_api_key: str = "", image_base_url: str = "") -> dict:
     """Generate image for a single shot. Returns { shot_id, image_path, image_url }."""
     base_url = image_base_url or settings.siliconflow_base_url
+    if image_base_url and not image_api_key:
+        raise ValueError("提供自定义 image_base_url 时必须同时提供 image_api_key")
     image_api_key = image_api_key or settings.siliconflow_api_key
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
@@ -76,6 +78,8 @@ async def generate_character_image(
     """Generate character design image. Returns { character_name, image_path, image_url, prompt }."""
     prompt = _build_character_prompt(character_name, role, description)
     base_url = image_base_url or settings.siliconflow_base_url
+    if image_base_url and not image_api_key:
+        raise ValueError("提供自定义 image_base_url 时必须同时提供 image_api_key")
     image_api_key = image_api_key or settings.siliconflow_api_key
 
     async with httpx.AsyncClient(timeout=120) as client:
@@ -106,8 +110,8 @@ async def generate_character_image(
     output_path = CHARACTER_DIR / filename
     try:
         output_path.resolve().relative_to(CHARACTER_DIR.resolve())
-    except ValueError:
-        raise ValueError(f"Unsafe output path detected: {output_path}")
+    except ValueError as err:
+        raise ValueError(f"Unsafe output path detected: {output_path}") from err
     output_path.write_bytes(img_resp.content)
 
     return {

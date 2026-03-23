@@ -80,7 +80,7 @@ watch(() => props.episode?.episode, () => {
 
 async function send() {
   const text = input.value.trim()
-  if (!text || streaming.value || !props.episode) return
+  if (!text || streaming.value || applying.value || !props.episode) return
   input.value = ''
   error.value = ''
   messages.value = [...messages.value, { role: 'user', text }]
