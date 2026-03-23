@@ -80,7 +80,7 @@ watch(() => props.character?.name, () => {
 
 async function send() {
   const text = input.value.trim()
-  if (!text || streaming.value || applying.value || !props.character) return
+  if (!text || streaming.value || !props.character) return
   input.value = ''
   error.value = ''
   messages.value = [...messages.value, { role: 'user', text }]
@@ -127,13 +127,12 @@ async function confirmApply() {
       error.value = '未能获取修改结果，请重试'
       return
     }
-    store.updateCharacter(currentChar.name, res.description)
+    store.updateCharacter(props.character.name, res.description)
     messages.value = []
     input.value = ''
     emit('close')
-  } catch (e) {
-    console.error('[CharacterChatPanel] confirmApply 失败:', e)
-    error.value = `应用失败：${e?.message || '请重试'}`
+  } catch {
+    error.value = '应用失败，请重试'
   } finally {
     applying.value = false
   }

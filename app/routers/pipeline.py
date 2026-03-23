@@ -62,10 +62,16 @@ async def auto_generate(
     image_api_key = resolve_image_key(keys.image_api_key or req.image_api_key or "")
     image_base_url = keys.image_base_url or _cfg.siliconflow_base_url
 
-    video_cfg = video_config_dep(request)
-    video_api_key = video_cfg["video_api_key"]
-    video_base_url = video_cfg["video_base_url"]
-    video_provider = video_cfg["video_provider"]
+    video_provider = keys.video_provider or "dashscope"
+    raw_video_key = keys.video_api_key or req.video_api_key or ""
+    if video_provider == "kling":
+        video_api_key = raw_video_key or _cfg.kling_api_key
+        video_base_url = keys.video_base_url or _cfg.kling_base_url
+    else:
+        video_api_key = raw_video_key or _cfg.dashscope_api_key
+        video_base_url = keys.video_base_url or _cfg.dashscope_base_url
+    if not video_api_key:
+        raise HTTPException(status_code=400, detail=f"视频生成 API Key 未配置 (provider={video_provider})")
 
     async def _run_pipeline():
         """后台执行流水线"""
