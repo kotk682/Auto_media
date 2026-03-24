@@ -97,13 +97,13 @@
         </div>
         <div class="field">
           <label>模型</label>
-          <select v-model="imageModelSelect" class="select-input">
+          <select v-if="!(currentImageModels.length === 1 && currentImageModels[0].id === 'custom')" v-model="imageModelSelect" class="select-input">
             <option v-for="m in currentImageModels" :key="m.id" :value="m.id">{{ m.label }}</option>
           </select>
           <input
             v-if="imageModelSelect === 'custom'"
             v-model="imageModelCustom"
-            placeholder="输入模型名称，如 black-forest-labs/FLUX.1-schnell"
+            :placeholder="imageProvider === 'doubao' ? '输入端点 ID，如 ep-xxxxxxxx' : '输入模型名称，如 black-forest-labs/FLUX.1-schnell'"
             style="margin-top:6px"
           />
         </div>
@@ -137,13 +137,13 @@
         </div>
         <div class="field">
           <label>模型</label>
-          <select v-model="videoModelSelect" class="select-input">
+          <select v-if="!(currentVideoModels.length === 1 && currentVideoModels[0].id === 'custom')" v-model="videoModelSelect" class="select-input">
             <option v-for="m in currentVideoModels" :key="m.id" :value="m.id">{{ m.label }}</option>
           </select>
           <input
             v-if="videoModelSelect === 'custom'"
             v-model="videoModelCustom"
-            placeholder="输入模型名称，如 wan2.1-i2v-turbo"
+            :placeholder="videoProvider === 'doubao' ? '输入端点 ID，如 ep-xxxxxxxx' : '输入模型名称，如 wan2.1-i2v-turbo'"
             style="margin-top:6px"
           />
         </div>

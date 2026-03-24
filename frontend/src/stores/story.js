@@ -41,10 +41,10 @@ export const useStoryStore = defineStore('story', {
     },
     setOutlineResult({ story_id, meta, characters, relationships, outline, usage }) {
       this.storyId = story_id
-      this.meta = meta
-      this.characters = characters
-      this.relationships = relationships || []
-      this.outline = outline
+      if (meta != null) this.meta = meta
+      if (characters != null && characters.length > 0) this.characters = characters
+      if (relationships != null && relationships.length > 0) this.relationships = relationships
+      if (outline != null && outline.length > 0) this.outline = outline
       if (usage) {
         this.usage.prompt_tokens += usage.prompt_tokens
         this.usage.completion_tokens += usage.completion_tokens
@@ -58,7 +58,7 @@ export const useStoryStore = defineStore('story', {
         this.scenes.push(scene)
       }
     },
-    resetScenes() { this.scenes = []; this.step3Done = false },
+    resetScenes() { this.scenes = []; this.shots = []; this.step3Done = false },
     setShots(shots) {
       this.shots = shots.map(s => ({ ...s, ttsLoading: false, imageLoading: false, videoLoading: false }))
     },
@@ -72,9 +72,17 @@ export const useStoryStore = defineStore('story', {
       if (c) { c.description = description }
     },
     applyRefine({ characters, relationships, outline, meta_theme, usage }) {
-      if (characters) this.characters = characters
-      if (relationships) this.relationships = relationships
-      if (outline) this.outline = outline
+      if (characters != null && characters.length > 0) {
+        // Merge by name: a partial LLM response must not wipe out unlisted characters
+        const nameMap = Object.fromEntries(characters.map(c => [c.name, c]))
+        this.characters = this.characters.map(c => nameMap[c.name] ?? c)
+      }
+      if (relationships != null && relationships.length > 0) this.relationships = relationships
+      if (outline != null && outline.length > 0) {
+        // Merge by episode: a partial LLM response must not wipe out unlisted episodes
+        const epMap = Object.fromEntries(outline.map(ep => [ep.episode, ep]))
+        this.outline = this.outline.map(ep => epMap[ep.episode] ?? ep)
+      }
       if (meta_theme && this.meta) this.meta.theme = meta_theme
       if (usage) {
         this.usage.prompt_tokens += usage.prompt_tokens
@@ -108,6 +116,17 @@ export const useStoryStore = defineStore('story', {
       }
     },
     setWorldBuildingStart({ story_id, turn, question, usage }) {
+      // Only wipe story data when the story_id has actually changed
+      if (story_id !== this.storyId) {
+        this.meta = null
+        this.characters = []
+        this.relationships = []
+        this.outline = []
+        this.scenes = []
+        this.shots = []
+        this.step3Done = false
+        this.selectedSetting = ''
+      }
       this.storyId = story_id
       this.wbTurn = turn
       this.wbCurrentQuestion = question

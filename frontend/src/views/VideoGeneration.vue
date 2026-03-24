@@ -286,7 +286,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSettingsStore } from '../stores/settings.js'
 import { useStoryStore } from '../stores/story.js'
@@ -322,6 +322,13 @@ const progress = ref({
   show: false,
   label: '',
   percent: 0
+})
+
+const isMounted = ref(true)
+let parseAbortController = null
+onUnmounted(() => {
+  isMounted.value = false
+  parseAbortController?.abort()
 })
 
 // 视频拼接
@@ -557,6 +564,10 @@ async function parseStoryboard() {
   storyStore.clearShots()
   progress.value = { show: true, label: '正在调用 LLM 解析分镜...', percent: 20 }
 
+  parseAbortController?.abort()
+  parseAbortController = new AbortController()
+  const { signal } = parseAbortController
+
   // Mock 模式
   if (settings.useMock) {
     progress.value = { show: true, label: 'Mock 模式：生成模拟分镜...', percent: 50 }
@@ -614,7 +625,7 @@ async function parseStoryboard() {
     storyStore.setShots(mockShots)
 
     setTimeout(() => {
-      progress.value.show = false
+      if (isMounted.value) progress.value.show = false
     }, 500)
 
     isParsing.value = false
@@ -632,6 +643,7 @@ async function parseStoryboard() {
         'Content-Type': 'application/json',
         ...getHeaders()
       },
+      signal,
       body: JSON.stringify({
         script,
         provider: settings.provider,
@@ -654,12 +666,15 @@ async function parseStoryboard() {
       storyStore.usage.completion_tokens += data.usage.completion_tokens || 0
     }
 
-    progress.value = { show: true, label: '完成', percent: 100 }
-
-    setTimeout(() => {
-      progress.value.show = false
-    }, 800)
+    if (isMounted.value) {
+      progress.value = { show: true, label: '完成', percent: 100 }
+      setTimeout(() => {
+        if (isMounted.value) progress.value.show = false
+      }, 800)
+    }
   } catch (err) {
+    if (err.name === 'AbortError') return
+    if (!isMounted.value) return
     const msg = err.message || '请求失败'
     if (isAuthError(msg)) {
       keyModalType.value = 'invalid'
@@ -707,16 +722,18 @@ async function loadVoices() {
     const res = await fetch(`${getBackendUrl()}/api/v1/tts/voices`, { headers: getHeaders() })
     if (!res.ok) {
       console.error('Failed to load voices:', res.status, res.statusText)
-      voices.value = []
+      if (isMounted.value) voices.value = []
       return
     }
-    voices.value = await res.json()
+    const data = await res.json()
+    if (!isMounted.value) return
+    voices.value = data
     if (voices.value.length > 0) {
       selectedVoice.value = voices.value[0].id
     }
   } catch (err) {
     console.error('Failed to load voices:', err)
-    voices.value = []
+    if (isMounted.value) voices.value = []
   }
 }
 
@@ -742,6 +759,7 @@ async function generateOneTTS(shotId) {
     shot.audio_url = r.audio_url
     shot.audio_duration = r.duration_seconds
   } catch (err) {
+    if (!isMounted.value) return
     console.error('TTS failed:', err)
     const msg = err.message || '请求失败'
     if (isAuthError(msg)) {
@@ -783,6 +801,7 @@ async function generateOneImage(shotId) {
     const r = results[0]
     shot.image_url = r.image_url
   } catch (err) {
+    if (!isMounted.value) return
     console.error('Image generation failed:', err)
     const msg = err.message || '请求失败'
     if (isAuthError(msg)) {
@@ -823,6 +842,7 @@ async function generateOneVideo(shotId) {
     const r = results[0]
     shot.video_url = r.video_url
   } catch (err) {
+    if (!isMounted.value) return
     console.error('Video generation failed:', err)
     const msg = err.message || '请求失败'
     if (isAuthError(msg)) {

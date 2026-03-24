@@ -40,7 +40,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import StepIndicator from '../components/StepIndicator.vue'
 import ApiKeyModal from '../components/ApiKeyModal.vue'
@@ -53,12 +53,9 @@ const router = useRouter()
 const store = useStoryStore()
 const settings = useSettingsStore()
 
-const isMounted = ref(true)
-onUnmounted(() => { isMounted.value = false })
-
+const loading = ref(false)
 const idea = ref(store.input.idea || '')
 watch(idea, (val) => { store.input.idea = val })
-const loading = ref(false)
 const error = ref('')
 const showGenerator = ref(false)
 const showKeyModal = ref(false)
@@ -81,7 +78,6 @@ async function submit() {
     store.setInput(idea.value, '', '')
     const result = await worldBuildingStart(idea.value)
     store.setWorldBuildingStart(result)
-    if (!isMounted.value) return
     store.setStep(2)
     router.push('/step2')
   } catch (e) {

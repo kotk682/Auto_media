@@ -77,6 +77,7 @@
       <div v-if="complete || (!store.wbCurrentQuestion && store.wbTurn > 0)" class="complete-area">
         <div class="complete-msg">{{ store.meta ? '世界观构建完成！' : '世界观构建完成，正在生成大纲...' }}</div>
         <button v-if="store.meta && !submitting" class="submit-btn" style="margin-top: 12px" @click="router.push('/step3')">前往剧本生成 →</button>
+        <button v-if="error && !submitting && !store.meta" class="submit-btn" style="margin-top: 12px" @click="retryOutline">重试生成大纲</button>
         <div v-if="error" class="error-tip" style="margin-top: 8px">{{ error }}</div>
       </div>
     </div>
@@ -91,7 +92,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import StepIndicator from '../components/StepIndicator.vue'
 import ApiKeyModal from '../components/ApiKeyModal.vue'
@@ -102,9 +103,6 @@ import { worldBuildingTurn, generateOutline } from '../api/story.js'
 const router = useRouter()
 const store = useStoryStore()
 const settings = useSettingsStore()
-
-const isMounted = ref(true)
-onUnmounted(() => { isMounted.value = false })
 
 const answer = ref('')
 const customAnswer = ref('')
@@ -136,12 +134,10 @@ onMounted(async () => {
     submitting.value = true
     try {
       const outline = await generateOutline(store.storyId, store.selectedSetting)
-      if (!isMounted.value) return
       store.setOutlineResult(outline)
       store.setStep(3)
       router.push('/step3')
     } catch (e) {
-      if (!isMounted.value) return
       const msg = e.message || '请求失败'
       if (isAuthError(msg)) {
         keyModalType.value = 'invalid'
@@ -151,10 +147,32 @@ onMounted(async () => {
         error.value = msg
       }
     } finally {
-      if (isMounted.value) submitting.value = false
+      submitting.value = false
     }
   }
 })
+
+async function retryOutline() {
+  submitting.value = true
+  error.value = ''
+  try {
+    const outline = await generateOutline(store.storyId, store.selectedSetting)
+    store.setOutlineResult(outline)
+    store.setStep(3)
+    router.push('/step3')
+  } catch (e) {
+    const msg = e.message || '请求失败'
+    if (isAuthError(msg)) {
+      keyModalType.value = 'invalid'
+      keyModalMsg.value = 'API Key 无效或已过期，请检查后重新设置。'
+      showKeyModal.value = true
+    } else {
+      error.value = msg
+    }
+  } finally {
+    submitting.value = false
+  }
+}
 
 async function submitTurn() {
   if (!settings.useMock && !settings.effectiveLlmApiKey) { showKeyModal.value = true; return }
@@ -171,7 +189,6 @@ async function submitTurn() {
       complete.value = true
       const outline = await generateOutline(store.storyId, result.world_summary)
       store.setOutlineResult(outline)
-      if (!isMounted.value) return
       store.setStep(3)
       router.push('/step3')
     }

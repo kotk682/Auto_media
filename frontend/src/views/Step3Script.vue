@@ -63,7 +63,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import StepIndicator from '../components/StepIndicator.vue'
 import OutlinePreview from '../components/OutlinePreview.vue'
@@ -88,6 +88,9 @@ const showKeyModal = ref(false)
 const keyModalType = ref('missing')
 const keyModalMsg = ref('')
 
+let scriptAbortController = null
+onUnmounted(() => { scriptAbortController?.abort() })
+
 onMounted(() => {
   if (store.step3Done) {
     started.value = true
@@ -101,6 +104,8 @@ function isAuthError(msg) {
 
 async function startGenerate() {
   if (!settings.useMock && !settings.effectiveLlmApiKey) { showKeyModal.value = true; return }
+  scriptAbortController?.abort()
+  scriptAbortController = new AbortController()
   started.value = true
   streaming.value = true
   error.value = ''
@@ -118,7 +123,8 @@ async function startGenerate() {
       } else {
         error.value = msg || '生成失败，请重试'
       }
-    }
+    },
+    scriptAbortController.signal
   )
 }
 </script>

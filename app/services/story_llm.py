@@ -195,14 +195,15 @@ async def refine(story_id: str, change_type: str, change_summary: str, db: Async
 
     # 写回数据库，保持 DB 与前端状态同步
     updates = {}
-    if "characters" in data:
+    if data.get("characters") is not None:
         updates["characters"] = data["characters"]
-    if "relationships" in data:
+    if data.get("relationships") is not None:
         updates["relationships"] = data["relationships"]
-    if "outline" in data:
+    if data.get("outline") is not None:
         updates["outline"] = data["outline"]
-    if "meta_theme" in data and data["meta_theme"]:
-        updates["meta"] = {"theme": data["meta_theme"]}
+    if data.get("meta_theme") is not None:
+        existing_meta = story.get("meta") or {}
+        updates["meta"] = {**existing_meta, "theme": data["meta_theme"]}
     if updates:
         await repo.save_story(db, story_id, updates)
 
@@ -246,11 +247,19 @@ async def generate_outline(story_id: str, selected_setting: str, db: AsyncSessio
 
     client = _make_client(api_key, base_url)
     prompt = OUTLINE_PROMPT.format(selected_setting=selected_setting)
-    resp = await client.chat.completions.create(
+    # Stream to prevent ReadError on slow LLM responses
+    stream = await client.chat.completions.create(
         model=_get_model(provider, model),
         messages=[{"role": "user", "content": prompt}],
+        stream=True,
     )
-    data = _parse_json(resp.choices[0].message.content)
+    chunks = []
+    async for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            chunks.append(delta)
+    content = "".join(chunks)
+    data = _parse_json(content)
     await repo.save_story(db, story_id, {
         "selected_setting": selected_setting,
         "meta": data.get("meta"),
@@ -258,11 +267,10 @@ async def generate_outline(story_id: str, selected_setting: str, db: AsyncSessio
         "relationships": data.get("relationships", []),
         "outline": data.get("outline", []),
     })
-    usage = resp.usage
     return {
         "story_id": story_id,
         **data,
-        "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else None,
+        "usage": None,
     }
 
 

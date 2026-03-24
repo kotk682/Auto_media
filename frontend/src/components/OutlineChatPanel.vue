@@ -45,7 +45,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onUnmounted } from 'vue'
 import { useStoryStore } from '../stores/story.js'
 import { streamChat, refineStory } from '../api/story.js'
 
@@ -54,6 +54,9 @@ defineEmits(['close'])
 
 const store = useStoryStore()
 const messages = ref([])
+
+let chatAbortController = null
+onUnmounted(() => { chatAbortController?.abort() })
 const input = ref('')
 const streaming = ref(false)
 const streamingText = ref('')
@@ -87,6 +90,9 @@ async function send() {
   streaming.value = true
   streamingText.value = ''
 
+  chatAbortController?.abort()
+  chatAbortController = new AbortController()
+
   await streamChat(
     store.storyId,
     fullMessage,
@@ -118,7 +124,8 @@ async function send() {
       streaming.value = false
       streamingText.value = ''
       error.value = msg || 'AI 响应失败，请重试'
-    }
+    },
+    chatAbortController.signal
   )
 }
 
