@@ -18,7 +18,7 @@
 
 最终播放序列：
 
-```
+```text
 scene1_shot1 → [scene1_trans1] → scene1_shot2 → [scene1_trans2] → scene1_shot3
                                                                         ↓
                                                           [trans_scene1_scene2]  ← 跨场景桥接
@@ -39,7 +39,7 @@ scene2_shot1 → [scene2_trans1] → scene2_shot2 → [scene2_trans2] → scene2
 
 ### 2.2 两阶段生成流程
 
-```
+```text
 Phase 1：并行生成主镜
   scene1_shot1、scene1_shot2、scene1_shot3 同时生成（场景间并行）
 
@@ -126,7 +126,7 @@ reference_frames: Optional[dict] = Field(
 
 **文件**：`app/prompts/storyboard.py`
 
-```
+```text
 **Law 6 — 3+2+1 分镜结构规范**
 
 每个场景必须包含且仅包含 **3 个主镜头**（scene{N}_shot1/2/3）。
@@ -160,7 +160,7 @@ reference_frames: Optional[dict] = Field(
 
 ### 5.2 USER_TEMPLATE 输出格式约束
 
-```
+```text
 输出 JSON 数组按最终播放顺序排列所有镜头（含过渡），顺序如下：
   scene1_shot1 → scene1_trans1 → scene1_shot2 → scene1_trans2 → scene1_shot3
   → trans_scene1_scene2
@@ -253,13 +253,13 @@ def group_shots_by_scene(shots: list[dict]) -> OrderedDict:
     return groups
 ```
 
-### 7.2 链式生成两阶段改造
+### 7.2 链式生成两阶段改造（目标设计，待实现）
 
 **文件**：`app/services/video.py` — `generate_videos_chained`
 
-改造为两阶段：
+目标设计（待实现）：
 
-```
+```text
 Phase 1：场景间并行，场景内串行生成主镜头
   for each scene (并行):
     for each main shot (串行):
@@ -358,7 +358,7 @@ LLM 按播放顺序输出 JSON → `_parse_shots` 保持顺序 → `generate_vid
 
 以 2 个场景为例：
 
-```
+```text
 [scene1_shot1]          4s  主镜头
 [scene1_trans1]         2s  ← 场景内过渡（A_end + B_start 约束）
 [scene1_shot2]          4s  主镜头
@@ -398,9 +398,9 @@ LLM 按播放顺序输出 JSON → `_parse_shots` 保持顺序 → `generate_vid
 | `s.visual_prompt` | `s.final_video_prompt` | Shot 无 `visual_prompt` 字段 |
 | `s.camera_motion` | `s.camera_setup.movement` | Shot 无 `camera_motion` 字段 |
 
-### 13.2 两阶段 vs 单阶段：需明确改造路径
+### 13.2 两阶段 vs 单阶段：现状单阶段，需迁移
 
-当前 `generate_videos_chained` 是**单阶段**（场景内串行遍历所有 shot）。文档提出的两阶段（Phase 1 主镜头 → Phase 2 过渡镜头）需要额外的流程控制：
+当前 `generate_videos_chained` 是**单阶段**（场景内串行遍历所有 shot，尚不区分主镜头与过渡分镜）。实现文档中的两阶段需要以下额外工作：
 
 1. Phase 1 入口需要**过滤掉** `is_transition=True` 的 shot，仅处理主镜头
 2. Phase 1 完成后，对所有主镜头视频提取首帧和尾帧

@@ -235,7 +235,7 @@
                 <span class="tag">{{ shot.estimated_duration }}s</span>
               </div>
             </div>
-            <div v-if="shot.audio_reference?.content || shot.dialogue" class="shot-field">
+            <div v-if="(shot.audio_reference?.content || shot.dialogue) && shot.audio_reference?.type !== 'sfx'" class="shot-field">
               <label>台词 / 旁白</label>
               <p>{{ shot.audio_reference?.content || shot.dialogue }}</p>
             </div>
@@ -249,7 +249,7 @@
             </div>
 
             <!-- TTS controls -->
-            <div v-if="shot.audio_reference?.content || shot.dialogue" class="tts-bar">
+            <div v-if="(shot.audio_reference?.content || shot.dialogue) && shot.audio_reference?.type !== 'sfx'" class="tts-bar">
               <button class="tts-btn" @click="generateOneTTS(shot.shot_id)" :disabled="shot.ttsLoading">
                 {{ shot.ttsLoading ? '生成中...' : '生成语音' }}
               </button>

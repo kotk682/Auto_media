@@ -420,11 +420,12 @@ USER_TEMPLATE = """Convert this Audio-Visual Script into physically-precise stor
   - WS → ECU: Insert MS or MCU in between (smooth the jump)
   - Different locations: Start with EWS/WS establishing shot, then show closer detail shots
   - Example: Shot 1 (WS: entering room) → Shot 2 (MS: approaching desk) → Shot 3 (CU: sitting down) [NOT: WS immediately to CU]
-- **Explicit continuity anchors in EVERY final_video_prompt:**
-  - ALWAYS reference the previous shot or action state:
+- **Explicit continuity anchors in final_video_prompt (skip for the very first shot of each scene):**
+  - For all shots except the scene opener, ALWAYS reference the previous shot or action state:
     - BAD: "A man sits at desk"
     - GOOD: "Continuing from the previous shot where he walked toward the desk, he is now sitting in the same chair, camera pulls in closer while maintaining the warm office lighting from before"
   - Use these keywords: "continuing", "maintaining", "seamlessly transitioning", "from the previous frame", "same location", "camera pulls"
+  - For scene openers (first shot of a new location/scene), do NOT force continuity from the previous scene — begin fresh with an establishing description.
   - Describe how camera/framing relates to the previous shot (tighter? wider? different angle? but same location?)
 - **Visual matching:**
   - If Shot 2 ends with character's left hand on desk, Shot 3 must show that hand remaining on desk (unless they move it).
@@ -453,7 +454,7 @@ USER_TEMPLATE = """Convert this Audio-Visual Script into physically-precise stor
   - [ ] Character positions/states are consistent (sitting→sitting, standing→standing unless they moved)
   - [ ] Transition shots are inserted when needed
   - [ ] All final_video_prompts contain continuity keywords
-  - [ ] **CRITICAL: Count dialogue lines in script. Count non-null audio_reference in shots. They must match exactly.**
+  - [ ] **CRITICAL: Count dialogue/narration lines in script. Count audio_reference entries with type "dialogue" or "narration" in shots (exclude sfx). They must match exactly.**
   - [ ] **CRITICAL: No dialogue line appears in more than one shot.**
   - [ ] Each dialogue's audio_reference.content is unique (no repetition).
   - [ ] **CRITICAL: Read all storyboard_descriptions in sequence. Do they form a coherent visual narrative? Can they be concatenated and read as one flowing story?**

@@ -31,12 +31,23 @@ def _parse_shots(raw: str) -> List[Shot]:
                 "camera_angle": "Eye-level",
                 "movement": "Static",
             }
+        else:
+            # Partial nested dict: fill missing subfields so Pydantic validation passes
+            cs = item["camera_setup"]
+            cs.setdefault("shot_size", item.pop("shot_size", "MS"))
+            cs.setdefault("camera_angle", "Eye-level")
+            cs.setdefault("movement", "Static")
         if "dialogue" in item and "audio_reference" not in item:
             dlg = item.pop("dialogue")
             item["audio_reference"] = {
                 "type": "dialogue" if dlg else None,
                 "content": dlg,
             }
+        elif item.get("audio_reference") is None:
+            # Consume legacy dialogue key even when audio_reference key exists but is null
+            dlg = item.pop("dialogue", None)
+            if dlg:
+                item["audio_reference"] = {"type": "dialogue", "content": dlg}
         if "visual_elements" not in item:
             item["visual_elements"] = {
                 "subject_and_clothing": "",
@@ -44,6 +55,13 @@ def _parse_shots(raw: str) -> List[Shot]:
                 "environment_and_props": "",
                 "lighting_and_color": "",
             }
+        else:
+            # Partial nested dict: fill missing subfields
+            ve = item["visual_elements"]
+            ve.setdefault("subject_and_clothing", "")
+            ve.setdefault("action_and_expression", "")
+            ve.setdefault("environment_and_props", "")
+            ve.setdefault("lighting_and_color", "")
         if "scene_intensity" not in item:
             item["scene_intensity"] = "low"
         # 清理旧格式残留的顶层字段，避免 Pydantic 报错

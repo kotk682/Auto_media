@@ -190,8 +190,7 @@ class PipelineExecutor:
                 {
                     "shot_id": s.shot_id,
                     "image_url": image_map[s.shot_id]["image_url"],
-                    "visual_prompt": s.final_video_prompt,
-                    "camera_motion": s.camera_setup.movement,
+                    "final_video_prompt": s.final_video_prompt,
                 }
                 for s in self.shots
                 if s.shot_id in image_map
@@ -319,8 +318,7 @@ class PipelineExecutor:
             enhanced_prompt = self._enhance_prompt_with_character(s.final_video_prompt, self.character_info)
             shots_data.append({
                 "shot_id": s.shot_id,
-                "visual_prompt": enhanced_prompt,
-                "camera_motion": s.camera_setup.movement,
+                "final_video_prompt": enhanced_prompt,
             })
 
         scene_groups = video.group_shots_by_scene(shots_data)
@@ -430,8 +428,7 @@ class PipelineExecutor:
                 {
                     "shot_id": s.shot_id,
                     "image_url": image_map[s.shot_id]["image_url"],
-                    "visual_prompt": f"{s.final_video_prompt} {s.camera_setup.movement}",
-                    "camera_motion": s.camera_setup.movement,
+                    "final_video_prompt": s.final_video_prompt,
                 }
                 for s in self.shots
                 if s.shot_id in image_map
