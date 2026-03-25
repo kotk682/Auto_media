@@ -190,9 +190,9 @@ def _normalize_camera_movement(value: str) -> str:
         return max(weighted_matches)[1]
 
     if normalized == "pan" or normalized.startswith("pan "):
-        return "Pan left" if "left" in normalized else "Pan right" if "right" in normalized else "Pan right"
+        return "Pan left" if "left" in normalized else "Pan right"
     if normalized == "tilt" or normalized.startswith("tilt "):
-        return "Tilt down" if "down" in normalized else "Tilt up" if "up" in normalized else "Tilt up"
+        return "Tilt down" if "down" in normalized else "Tilt up"
     if normalized in {"crane", "boom", "jib"} or normalized.startswith("crane ") or normalized.startswith("boom ") or normalized.startswith("jib "):
         return "Crane down" if "down" in normalized else "Crane up"
 

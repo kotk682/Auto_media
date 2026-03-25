@@ -40,7 +40,7 @@ def _require_manual_env() -> None:
         )
 
 
-async def test_single_frame_i2v():
+async def run_single_frame_i2v():
     """测试单帧 I2V（当前方案）"""
     print("\n" + "="*80)
     print("测试1：单帧 I2V（当前方案）")
@@ -75,7 +75,7 @@ async def test_single_frame_i2v():
     return first_frame, video
 
 
-async def test_first_last_frame_transition():
+async def run_first_last_frame_transition():
     """测试双帧过渡（新功能）"""
     print("\n" + "="*80)
     print("测试2：双帧过渡（新功能）")
@@ -122,7 +122,7 @@ async def test_first_last_frame_transition():
     return first_frame, last_frame, video
 
 
-async def test_scene_transition():
+async def run_scene_transition():
     """测试场景切换过渡"""
     print("\n" + "="*80)
     print("测试3：场景切换过渡")
@@ -181,13 +181,13 @@ async def main():
 
     try:
         # 测试1：单帧 I2V
-        await test_single_frame_i2v()
+        await run_single_frame_i2v()
 
         # 测试2：双帧过渡
-        await test_first_last_frame_transition()
+        await run_first_last_frame_transition()
 
         # 测试3：场景切换
-        await test_scene_transition()
+        await run_scene_transition()
 
         print("\n" + "="*80)
         print("✅ 所有测试完成！")

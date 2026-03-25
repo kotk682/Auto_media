@@ -45,6 +45,25 @@
 5. **结构化 `messages` 演进：采纳，但分阶段实施。**
    当前代码里已经存在直接传 `messages` 的链路，也还保留 `BaseLLMProvider.complete(system, user)` 旧接口。适合先在高收益长上下文请求上落地，再逐步统一 provider 抽象，而不是一口气全仓替换。
 
+### 1.3 模块化现状与重构口径
+
+当前项目的模块化基础是存在的，但核心生成链路还没有真正收口。
+
+现状判断：
+
+- `provider factory`、`schema`、`repository` 这几层已经初步模块化
+- 真正的核心耦合点仍集中在 prompt 组装与角色一致性链路
+- 同一件事目前分散在 `prompts/*`、`storyboard.py`、`pipeline_executor.py`、`image.py`、`video.py` 多处共同决定
+
+因此本文档的实施原则不是“先做功能，重构以后再说”，而是：
+
+1. **本方案落地时，应同步完成最小必要的结构重构。**
+   也就是把“统一上下文 + 分字段 payload 组装”抽成清晰模块，而不是继续在现有文件上叠加条件分支。
+2. **重构边界要收敛。**
+   本次只重构“生成链路核心模块”，不顺手扩大到全仓通用抽象、数据库大迁移、全 provider 接口统一重写。
+3. **目标是提升结构质量，而不是制造一轮大面积改名。**
+   优先消除重复 prompt 组装、角色增强重复注入、手动/自动链路分叉三类结构问题。
+
 ---
 
 ## 二、当前问题与真实链路
@@ -567,6 +586,24 @@ character_section = character_section_override or build_character_section(charac
    - 在上层按“静态前缀在前，动态任务在后”构建 messages
    - 对世界观摘要、系统指令、few-shot 样本等稳定内容接入 Prompt Caching
 
+### 9.3 本次实施应同步完成的结构重构
+
+为了避免该方案最终变成“功能补丁散落在多个文件里”，实施时应把下面这些结构性动作与功能一起完成：
+
+1. **抽出单一的生成组装入口。**
+   新能力不再分别塞进 `pipeline_executor.py`、`image.py`、`video.py`；统一收口到 `app/core/story_context.py` 的 payload builder。
+2. **明确模块职责边界。**
+   - `prompts/*`：只负责 LLM 提示词模板
+   - `storyboard.py`：只负责分镜解析、字段归一化、兼容旧格式
+   - `story_context.py`：只负责运行期一致性上下文与 payload 组装
+   - `image.py` / `video.py`：只负责调用下游生成服务
+3. **弱化 router 层业务拼装。**
+   `pipeline.py`、`image.py`、`video.py` 路由层只负责参数接入和流程编排，不再承担 prompt 决策逻辑。
+4. **保留兼容层，但冻结旧入口继续扩散。**
+   `_enhance_prompt_with_character()`、旧式 fallback prompt 仍可短期保留，但不再作为新增逻辑挂载点。
+5. **自动链路与手动链路一起改。**
+   本次不接受“先只改 auto-generate，手动后补”的做法，否则结构分叉会继续扩大。
+
 ---
 
 ## 十、缓存与 CRUD 策略
@@ -894,6 +931,12 @@ Prompt Caching 建议优先用于以下一致性相关请求：
 7. `story_repository.py` 增加专用缓存读写 helper
 8. 增加缓存失效逻辑
 
+Phase 1 的补充要求：
+
+- 以上步骤在实施时，默认包含 9.3 节定义的最小必要重构
+- 不允许只把逻辑“挪一份”到新文件，同时保留旧链路继续增长
+- 所有新增一致性逻辑都应优先挂在 `story_context.py`，而不是继续塞回 `pipeline_executor.py`
+
 ### Phase 1.5：为 Prompt Caching 做工程准备
 
 9. 补 `normalize_cache_block()` / `get_cache_fingerprint()`
@@ -937,5 +980,6 @@ Prompt Caching 建议优先用于以下一致性相关请求：
 6. 缓存写入与失效通过专用 helper 管理，不直接裸写 `meta`
 7. Prompt Caching 在“静态前缀已稳定”后再接入，并始终保留“不支持即降级”的 provider 兼容路径
 8. 不把 negative 自动正向改写、模型专属权重语法写入主方案，只保留为 provider 定向优化的可选项
+9. 该方案实施时同步完成最小必要的模块化重构，不采用“功能先打补丁、结构以后再收拾”的路径
 
 这样改动最小，且能与当前仓库和既有文档保持连续性。
