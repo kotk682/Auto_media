@@ -60,6 +60,7 @@ async def generate_tts(
     output_path = AUDIO_DIR / f"{shot_id}.mp3"
 
     communicate = edge_tts.Communicate(clean_dialogue(text), voice)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     await communicate.save(str(output_path))
 
     duration = await _get_audio_duration(output_path)

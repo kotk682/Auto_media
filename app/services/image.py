@@ -71,6 +71,7 @@ async def generate_image(visual_prompt: str, shot_id: str, model: str = DEFAULT_
         img_resp.raise_for_status()
 
     output_path = IMAGE_DIR / f"{shot_id}.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(img_resp.content)
 
     return {
@@ -139,6 +140,7 @@ async def generate_character_image(
         output_path.resolve().relative_to(CHARACTER_DIR.resolve())
     except ValueError as err:
         raise ValueError(f"Unsafe output path detected: {output_path}") from err
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(img_resp.content)
 
     return {

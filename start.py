@@ -23,7 +23,7 @@ def start():
     print("\n[启动] 后端 :8000  前端 :5173\n")
 
     backend_proc = subprocess.Popen(
-        "uv run uvicorn app.main:app --reload",
+        "uv run uvicorn app.main:app --reload --reload-dir app",
         shell=True, cwd=ROOT,
     )
     frontend_proc = subprocess.Popen(

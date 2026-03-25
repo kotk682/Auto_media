@@ -37,6 +37,7 @@ async def generate_video(
         vid_resp.raise_for_status()
 
     output_path = VIDEO_DIR / f"{shot_id}.mp4"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(vid_resp.content)
 
     return {
