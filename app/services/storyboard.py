@@ -165,36 +165,36 @@ def _normalize_camera_movement(value: str) -> str:
     normalized = _collapse_spaces(normalized)
 
     alias_groups = (
-        ("Slow Dolly in", ("dolly in", "push in", "push-in", "zoom in", "camera in")),
-        ("Dolly out", ("dolly out", "pull out", "pull back", "zoom out", "camera out")),
-        ("Pan left", ("pan left", "left pan", "pan to the left")),
-        ("Pan right", ("pan right", "right pan", "pan to the right")),
-        ("Tilt up", ("tilt up", "tilt upward", "tilt upwards")),
-        ("Tilt down", ("tilt down", "tilt downward", "tilt downwards")),
-        ("Tracking shot", ("tracking shot", "track shot", "tracking", "follow shot", "follow camera")),
-        ("Handheld subtle shake", ("handheld", "hand held", "subtle shake", "slight shake", "camera shake")),
-        ("Crane up", ("crane up", "boom up", "jib up")),
-        ("Crane down", ("crane down", "boom down", "jib down")),
-        ("Static", ("static", "locked off", "lock off", "still camera", "fixed camera", "no camera movement")),
+        ("Slow Dolly in", ("dolly in", "push in", "push-in", "zoom in", "camera in", "缓慢推近", "推近", "推进", "拉近", "镜头推进")),
+        ("Dolly out", ("dolly out", "pull out", "pull back", "zoom out", "camera out", "拉远", "后拉", "镜头拉远", "拉出")),
+        ("Pan left", ("pan left", "left pan", "pan to the left", "左摇", "向左摇", "往左摇", "镜头左摇")),
+        ("Pan right", ("pan right", "right pan", "pan to the right", "右摇", "向右摇", "往右摇", "镜头右摇")),
+        ("Tilt up", ("tilt up", "tilt upward", "tilt upwards", "上摇", "上仰", "镜头上摇", "向上倾斜")),
+        ("Tilt down", ("tilt down", "tilt downward", "tilt downwards", "下摇", "下俯", "镜头下摇", "向下倾斜")),
+        ("Tracking shot", ("tracking shot", "track shot", "tracking", "follow shot", "follow camera", "跟拍", "跟随", "跟镜", "跟随镜头")),
+        ("Handheld subtle shake", ("handheld", "hand held", "subtle shake", "slight shake", "camera shake", "手持", "手持晃动", "轻微手持晃动", "轻微晃动")),
+        ("Crane up", ("crane up", "boom up", "jib up", "升降上移", "吊臂上移", "摇臂上移", "上升摇臂")),
+        ("Crane down", ("crane down", "boom down", "jib down", "升降下移", "吊臂下移", "摇臂下移", "下降摇臂")),
+        ("Static", ("static", "locked off", "lock off", "still camera", "fixed camera", "no camera movement", "固定机位", "定机位", "静止机位", "静态镜头", "固定镜头")),
     )
 
     weighted_matches: list[tuple[int, str]] = []
     for index, (canonical, aliases) in enumerate(alias_groups):
         for alias in aliases:
             if alias in normalized:
-                score = 2 if any(speed in normalized for speed in ("fast", "slow", "slight", "subtle")) else 1
+                score = 2 if any(speed in normalized for speed in ("fast", "slow", "slight", "subtle", "快速", "缓慢", "轻微")) else 1
                 weighted_matches.append((score * 100 - index, canonical))
                 break
 
     if weighted_matches:
         return max(weighted_matches)[1]
 
-    if normalized == "pan" or normalized.startswith("pan "):
-        return "Pan left" if "left" in normalized else "Pan right"
-    if normalized == "tilt" or normalized.startswith("tilt "):
-        return "Tilt down" if "down" in normalized else "Tilt up"
-    if normalized in {"crane", "boom", "jib"} or normalized.startswith("crane ") or normalized.startswith("boom ") or normalized.startswith("jib "):
-        return "Crane down" if "down" in normalized else "Crane up"
+    if normalized in {"pan", "摇镜", "摇摄"} or normalized.startswith("pan ") or normalized.startswith("摇"):
+        return "Pan left" if ("left" in normalized or "左" in normalized) else "Pan right"
+    if normalized in {"tilt", "俯仰"} or normalized.startswith("tilt ") or normalized.startswith("上摇") or normalized.startswith("下摇") or normalized.startswith("上仰") or normalized.startswith("下俯"):
+        return "Tilt down" if ("down" in normalized or "下" in normalized or "俯" in normalized) else "Tilt up"
+    if normalized in {"crane", "boom", "jib", "升降", "摇臂", "吊臂"} or normalized.startswith("crane ") or normalized.startswith("boom ") or normalized.startswith("jib ") or normalized.startswith("升降") or normalized.startswith("摇臂") or normalized.startswith("吊臂"):
+        return "Crane down" if ("down" in normalized or "下" in normalized) else "Crane up"
 
     return "Static"
 
