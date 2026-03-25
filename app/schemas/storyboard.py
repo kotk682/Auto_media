@@ -30,11 +30,14 @@ class Shot(BaseModel):
     storyboard_description: str = Field(description="中文画面简述，供前端展示（2-4句具体描述）")
     camera_setup: CameraSetup = Field(description="摄影机参数")
     visual_elements: VisualElements = Field(description="结构化视觉元素")
+    image_prompt: Optional[str] = Field(default=None, description="静态首帧图片提示词，供图片生成模型使用")
     final_video_prompt: str = Field(description="完整英文物理级 Prompt，直接送入视频生成 API")
+    last_frame_prompt: Optional[str] = Field(default=None, description="尾帧提示词（可选），用于生成双帧过渡的结束参考图")
     audio_reference: Optional[AudioReference] = Field(default=None, description="音频关联")
     mood: Optional[str] = Field(default=None, description="情绪基调英文短语")
     scene_position: Optional[Literal["establishing", "development", "climax", "resolution"]] = Field(default=None, description="镜头在场景中的位置")
     transition_from_previous: Optional[str] = Field(default=None, description="与前一个镜头的视觉/叙事过渡关系描述（如何平滑衔接、状态变化、摄像机运动等）")
+    last_frame_url: Optional[str] = Field(default=None, description="尾帧图片URL（可选），提供时启用双帧过渡模式")
 
 
 class Usage(BaseModel):

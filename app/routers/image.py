@@ -15,6 +15,7 @@ class ImageRequest(BaseModel):
 class ImageResult(BaseModel):
     shot_id: str
     image_url: str
+    last_frame_url: Optional[str] = None
 
 
 @router.post("/{project_id}/generate", response_model=List[ImageResult])

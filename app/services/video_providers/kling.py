@@ -17,6 +17,8 @@ class KlingVideoProvider(BaseVideoProvider):
 
     API Key 格式：access_key_id:access_key_secret
     （在可灵开放平台 → API Key 管理页面获取两个字段，用冒号拼接）
+
+    注意：当前不支持双帧过渡模式，last_frame_url 参数将被忽略。
     """
 
     def _make_token(self, api_key: str) -> str:
@@ -34,7 +36,29 @@ class KlingVideoProvider(BaseVideoProvider):
         }
         return jwt.encode(payload, secret_key, algorithm="HS256")
 
-    async def generate(self, image_url: str, prompt: str, model: str, api_key: str, base_url: str) -> str:
+    async def generate(
+        self,
+        image_url: str,
+        prompt: str,
+        model: str,
+        api_key: str,
+        base_url: str,
+        last_frame_url: str = "",
+    ) -> str:
+        """生成视频。
+
+        Args:
+            image_url: 首帧图片URL
+            prompt: 动作描述
+            model: 模型名称
+            api_key: API密钥
+            base_url: API基础URL
+            last_frame_url: 尾帧图片URL（暂不支持，将被忽略）
+
+        Returns:
+            视频URL
+        """
+        # 注意：Kling 暂不支持双帧过渡，忽略 last_frame_url
         token = self._make_token(api_key)
         effective_base = base_url or DEFAULT_BASE_URL
         async with httpx.AsyncClient(timeout=30) as client:

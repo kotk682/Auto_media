@@ -28,10 +28,27 @@ async def generate_video(
     video_api_key: str = "",
     video_base_url: str = "",
     video_provider: str = DEFAULT_PROVIDER,
+    last_frame_url: str = "",
 ) -> dict:
-    """Generate video for a single shot. Returns { shot_id, video_path, video_url }."""
+    """Generate video for a single shot.
+
+    Args:
+        image_url: 首帧图片URL
+        prompt: 动作描述
+        shot_id: 镜头ID
+        model: 视频生成模型
+        video_api_key: API密钥
+        video_base_url: API基础URL
+        video_provider: 视频生成服务商
+        last_frame_url: 尾帧图片URL（可选），提供时启用双帧过渡模式
+
+    Returns:
+        { shot_id, video_path, video_url }
+    """
     provider = get_video_provider(video_provider)
-    remote_url = await provider.generate(image_url, prompt, model, video_api_key, video_base_url)
+    remote_url = await provider.generate(
+        image_url, prompt, model, video_api_key, video_base_url, last_frame_url
+    )
 
     async with httpx.AsyncClient(timeout=60) as client:
         vid_resp = await client.get(remote_url)
@@ -58,7 +75,10 @@ async def generate_videos_batch(
 ) -> list[dict]:
     """
     Generate videos for all shots concurrently.
-    Each shot must have: shot_id, image_url (relative), visual_prompt, camera_motion.
+
+    Each shot must have: shot_id, image_url (relative), final_video_prompt.
+    Optional: last_frame_url (relative) - 如果提供，启用双帧过渡模式。
+
     base_url: server base URL to convert relative image_url to absolute.
     """
     tasks = [
@@ -70,6 +90,7 @@ async def generate_videos_batch(
             video_api_key=video_api_key,
             video_base_url=video_base_url,
             video_provider=video_provider,
+            last_frame_url=f"{base_url}{shot['last_frame_url']}" if shot.get("last_frame_url") else "",
         )
         for shot in shots
         if shot.get("image_url")
@@ -109,7 +130,7 @@ async def generate_videos_chained(
     不同场景之间并行。
 
     Args:
-        shots: 镜头列表，每个 dict 需含 shot_id, visual_prompt, camera_motion
+        shots: 镜头列表，每个 dict 需含 shot_id, final_video_prompt，可选 image_prompt
         base_url: 服务器地址，用于拼接本地文件 URL
         model: 视频生成模型
         image_model: 图片生成模型
@@ -128,7 +149,8 @@ async def generate_videos_chained(
 
         for idx, shot in enumerate(scene_shots):
             shot_id = shot["shot_id"]
-            visual_prompt = shot.get("final_video_prompt") or shot.get("visual_prompt", "")
+            image_prompt = shot.get("image_prompt") or shot.get("visual_prompt") or shot.get("final_video_prompt", "")
+            video_prompt = shot.get("final_video_prompt") or shot.get("visual_prompt", "")
 
             if on_progress:
                 await on_progress(scene_key, idx, len(scene_shots), shot_id)
@@ -137,7 +159,7 @@ async def generate_videos_chained(
             if prev_frame_path is None:
                 # 场景首帧：独立生图
                 img_result = await generate_image(
-                    visual_prompt=visual_prompt,
+                    visual_prompt=image_prompt,
                     shot_id=shot_id,
                     model=image_model,
                     image_api_key=image_api_key,
@@ -159,7 +181,7 @@ async def generate_videos_chained(
             # 图到视频
             video_result = await generate_video(
                 image_url=image_url_for_video,
-                prompt=visual_prompt,
+                prompt=video_prompt,
                 shot_id=shot_id,
                 model=model,
                 video_api_key=video_api_key,

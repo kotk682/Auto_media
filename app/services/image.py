@@ -81,15 +81,67 @@ async def generate_image(visual_prompt: str, shot_id: str, model: str = DEFAULT_
 
 
 async def generate_images_batch(shots: list[dict], model: str = DEFAULT_MODEL, image_api_key: str = "", image_base_url: str = "", art_style: str = "") -> list[dict]:
-    """Generate images for all shots concurrently."""
+    """Generate images for all shots concurrently.
+
+    支持：
+    - 首帧图片（image_url）
+    - 尾帧图片（last_frame_url），如果 shot 中提供了 last_frame_prompt
+    """
     def _prompt(shot: dict) -> str:
-        p = shot.get("visual_prompt") or shot.get("final_video_prompt", "")
+        p = shot.get("image_prompt") or shot.get("visual_prompt") or shot.get("final_video_prompt", "")
         if not p or not p.strip():
-            raise ValueError(f"shot {shot.get('shot_id', '?')} has no visual_prompt / final_video_prompt")
+            raise ValueError(f"shot {shot.get('shot_id', '?')} has no image_prompt / visual_prompt / final_video_prompt")
         return inject_art_style(p, art_style)
 
-    tasks = [generate_image(_prompt(shot), shot["shot_id"], model, image_api_key, image_base_url) for shot in shots]
-    return list(await asyncio.gather(*tasks))
+    # 为每个shot生成图片的任务列表
+    tasks = []
+
+    for shot in shots:
+        shot_id = shot["shot_id"]
+
+        # 首帧图片
+        tasks.append(generate_image(_prompt(shot), shot_id, model, image_api_key, image_base_url))
+
+        # 尾帧图片（如果提供了last_frame_prompt）
+        if shot.get("last_frame_prompt"):
+            tasks.append(
+                generate_image(
+                    inject_art_style(shot["last_frame_prompt"], art_style),
+                    f"{shot_id}_lastframe",
+                    model,
+                    image_api_key,
+                    image_base_url,
+                )
+            )
+
+    # 并发执行所有图片生成任务
+    results = await asyncio.gather(*tasks)
+
+    # 组织结果：每个shot包含image_url和可选的last_frame_url
+    output = []
+    task_idx = 0
+    for shot in shots:
+        shot_id = shot["shot_id"]
+
+        # 首帧结果
+        first_frame_result = results[task_idx]
+        task_idx += 1
+
+        result = {
+            "shot_id": shot_id,
+            "image_path": first_frame_result["image_path"],
+            "image_url": first_frame_result["image_url"],
+        }
+
+        # 尾帧结果（如果有）
+        if shot.get("last_frame_prompt"):
+            last_frame_result = results[task_idx]
+            task_idx += 1
+            result["last_frame_url"] = last_frame_result["image_url"]
+
+        output.append(result)
+
+    return output
 
 
 async def generate_character_image(

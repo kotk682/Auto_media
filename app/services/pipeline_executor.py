@@ -158,16 +158,11 @@ class PipelineExecutor:
         )
 
         image_results = await image.generate_images_batch(
-            shots=[
-                {
-                    "shot_id": s.shot_id,
-                    "visual_prompt": self._build_generation_prompt(s),
-                }
-                for s in self.shots
-            ],
+            shots=[self._build_image_prompts(s, self.character_info) for s in self.shots],
             model=image_model,
             image_api_key=image_api_key,
             image_base_url=image_base_url,
+            art_style=self.art_style,
         )
         image_map = {r["shot_id"]: r for r in image_results}
 
@@ -193,7 +188,8 @@ class PipelineExecutor:
                 {
                     "shot_id": s.shot_id,
                     "image_url": image_map[s.shot_id]["image_url"],
-                    "final_video_prompt": self._build_generation_prompt(s),
+                    "final_video_prompt": s.final_video_prompt,
+                    "last_frame_url": image_map[s.shot_id].get("last_frame_url"),
                 }
                 for s in self.shots
                 if s.shot_id in image_map
@@ -203,6 +199,7 @@ class PipelineExecutor:
             video_api_key=video_api_key,
             video_base_url=video_base_url,
             video_provider=video_provider,
+            art_style=self.art_style,
         )
         video_map = {r["shot_id"]: r for r in video_results}
 
@@ -264,12 +261,22 @@ class PipelineExecutor:
             return visual_prompt
         return f"{visual_prompt} {' '.join(additions)}"
 
-    def _build_generation_prompt(self, shot: Shot) -> str:
-        """统一图片与视频生成 prompt，避免同镜头在不同阶段条件漂移。"""
-        return inject_art_style(
-            self._enhance_prompt_with_character(shot.final_video_prompt, self.character_info),
-            self.art_style,
-        )
+    @classmethod
+    def _build_image_prompts(cls, shot: Shot, character_info: Optional[dict]) -> dict:
+        """构建静态首帧/尾帧提示词，并统一注入角色外观增强。"""
+        prompts = {
+            "shot_id": shot.shot_id,
+            "image_prompt": cls._enhance_prompt_with_character(
+                shot.image_prompt or shot.final_video_prompt,
+                character_info,
+            ),
+        }
+        if shot.last_frame_prompt:
+            prompts["last_frame_prompt"] = cls._enhance_prompt_with_character(
+                shot.last_frame_prompt,
+                character_info,
+            )
+        return prompts
 
     async def _run_chained_strategy(
         self,
@@ -325,10 +332,18 @@ class PipelineExecutor:
         # 构建 shots 数据并增强 prompt
         shots_data = []
         for s in self.shots:
-            shots_data.append({
-                "shot_id": s.shot_id,
-                "final_video_prompt": self._build_generation_prompt(s),
-            })
+            prompt_data = self._build_image_prompts(s, self.character_info)
+            prompt_data["image_prompt"] = inject_art_style(prompt_data["image_prompt"], self.art_style)
+            if prompt_data.get("last_frame_prompt"):
+                prompt_data["last_frame_prompt"] = inject_art_style(
+                    prompt_data["last_frame_prompt"],
+                    self.art_style,
+                )
+            prompt_data["final_video_prompt"] = inject_art_style(
+                self._enhance_prompt_with_character(s.final_video_prompt, self.character_info),
+                self.art_style,
+            )
+            shots_data.append(prompt_data)
 
         scene_groups = video.group_shots_by_scene(shots_data)
         scene_names = list(scene_groups.keys())
@@ -406,13 +421,11 @@ class PipelineExecutor:
         )
 
         image_results = await image.generate_images_batch(
-            shots=[{
-                "shot_id": s.shot_id,
-                "visual_prompt": self._build_generation_prompt(s),
-            } for s in self.shots],
+            shots=[self._build_image_prompts(s, self.character_info) for s in self.shots],
             model=image_model,
             image_api_key=image_api_key,
             image_base_url=image_base_url,
+            art_style=self.art_style,
         )
         image_map = {r["shot_id"]: r for r in image_results}
 
@@ -440,7 +453,8 @@ class PipelineExecutor:
                 {
                     "shot_id": s.shot_id,
                     "image_url": image_map[s.shot_id]["image_url"],
-                    "final_video_prompt": self._build_generation_prompt(s),
+                    "final_video_prompt": s.final_video_prompt,
+                    "last_frame_url": image_map[s.shot_id].get("last_frame_url"),
                 }
                 for s in self.shots
                 if s.shot_id in image_map
@@ -450,6 +464,7 @@ class PipelineExecutor:
             video_api_key=video_api_key,
             video_base_url=video_base_url,
             video_provider=video_provider,
+            art_style=self.art_style,
         )
         video_map = {r["shot_id"]: r for r in video_results}
 

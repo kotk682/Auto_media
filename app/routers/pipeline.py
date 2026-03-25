@@ -256,7 +256,15 @@ async def generate_assets(
             # 图片
             state["progress_detail"] = {"step": "image", "current": 0, "total": total, "message": "生成图片..."}
             image_results = await image.generate_images_batch(
-                shots=[{"shot_id": s.shot_id, "final_video_prompt": s.final_video_prompt} for s in shots],
+                shots=[
+                    {
+                        "shot_id": s.shot_id,
+                        "image_prompt": s.image_prompt,
+                        "final_video_prompt": s.final_video_prompt,
+                        "last_frame_prompt": s.last_frame_prompt,
+                    }
+                    for s in shots
+                ],
                 model=image_model,
                 art_style=art_style,
                 **image_config,

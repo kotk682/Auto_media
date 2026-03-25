@@ -243,8 +243,12 @@
               <label>画面描述</label>
               <p>{{ shot.storyboard_description || shot.visual_description_zh }}</p>
             </div>
+            <div v-if="shot.image_prompt" class="shot-field">
+              <label>Image Prompt</label>
+              <p class="en">{{ shot.image_prompt }}</p>
+            </div>
             <div class="shot-field">
-              <label>Visual Prompt</label>
+              <label>Video Prompt</label>
               <p class="en">{{ shot.final_video_prompt || shot.visual_prompt }}</p>
             </div>
 
@@ -814,6 +818,7 @@ async function generateOneImage(shotId) {
     const results = await res.json()
     const r = results[0]
     shot.image_url = r.image_url
+    shot.last_frame_url = r.last_frame_url || null
   } catch (err) {
     if (!isMounted.value) return
     console.error('Image generation failed:', err)

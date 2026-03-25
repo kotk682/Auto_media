@@ -16,9 +16,33 @@ class MinimaxVideoProvider(BaseVideoProvider):
 
     文档: https://platform.minimaxi.com/document/video-01
     API Key 在 MiniMax 开放平台获取。
+
+    注意：当前不支持双帧过渡模式，last_frame_url 参数将被忽略。
     """
 
-    async def generate(self, image_url: str, prompt: str, model: str, api_key: str, base_url: str) -> str:
+    async def generate(
+        self,
+        image_url: str,
+        prompt: str,
+        model: str,
+        api_key: str,
+        base_url: str,
+        last_frame_url: str = "",
+    ) -> str:
+        """生成视频。
+
+        Args:
+            image_url: 首帧图片URL
+            prompt: 动作描述
+            model: 模型名称
+            api_key: API密钥
+            base_url: API基础URL
+            last_frame_url: 尾帧图片URL（暂不支持，将被忽略）
+
+        Returns:
+            视频URL
+        """
+        # 注意：MiniMax 暂不支持双帧过渡，忽略 last_frame_url
         effective_base = (base_url or DEFAULT_BASE_URL).rstrip("/")
         headers = {
             "Authorization": f"Bearer {api_key}",
