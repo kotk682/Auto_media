@@ -9,7 +9,7 @@
       <div class="idea-recap" @click="ideaExpanded = !ideaExpanded">
         <div class="recap-header">
           <span class="recap-label">你的灵感</span>
-          <span class="recap-toggle">{{ ideaExpanded ? '▲' : '▼' }}</span>
+          <span class="recap-toggle">{{ ideaExpanded ? '▼' : '▲' }}</span>
         </div>
         <div v-if="ideaExpanded" class="recap-body">{{ store.input.idea }}</div>
       </div>
@@ -109,7 +109,7 @@ const customAnswer = ref('')
 const submitting = ref(false)
 const complete = ref(false)
 const error = ref('')
-const ideaExpanded = ref(false)
+const ideaExpanded = ref(true)
 const historyEl = ref(null)
 const showKeyModal = ref(false)
 const keyModalType = ref('missing')

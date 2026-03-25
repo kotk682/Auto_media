@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from app.core.config import settings
-from app.core.api_keys import mask_key
+from app.core.api_keys import mask_key, inject_art_style
 from app.prompts.character import build_character_prompt
 
 IMAGE_DIR = Path("media/images")
@@ -80,13 +80,13 @@ async def generate_image(visual_prompt: str, shot_id: str, model: str = DEFAULT_
     }
 
 
-async def generate_images_batch(shots: list[dict], model: str = DEFAULT_MODEL, image_api_key: str = "", image_base_url: str = "") -> list[dict]:
+async def generate_images_batch(shots: list[dict], model: str = DEFAULT_MODEL, image_api_key: str = "", image_base_url: str = "", art_style: str = "") -> list[dict]:
     """Generate images for all shots concurrently."""
     def _prompt(shot: dict) -> str:
         p = shot.get("visual_prompt") or shot.get("final_video_prompt", "")
         if not p or not p.strip():
             raise ValueError(f"shot {shot.get('shot_id', '?')} has no visual_prompt / final_video_prompt")
-        return p
+        return inject_art_style(p, art_style)
 
     tasks = [generate_image(_prompt(shot), shot["shot_id"], model, image_api_key, image_base_url) for shot in shots]
     return list(await asyncio.gather(*tasks))
@@ -100,9 +100,11 @@ async def generate_character_image(
     model: str = DEFAULT_MODEL,
     image_api_key: str = "",
     image_base_url: str = "",
+    art_style: str = "",
 ) -> dict:
     """Generate character design image. Returns { character_name, image_path, image_url, prompt }."""
     prompt = build_character_prompt(character_name, role, description)
+    prompt = inject_art_style(prompt, art_style)
     base_url = image_base_url or settings.siliconflow_base_url
     if image_base_url and not image_api_key:
         raise HTTPException(status_code=400, detail="提供自定义 image_base_url 时必须同时提供 image_api_key")
@@ -155,12 +157,19 @@ async def generate_character_images_batch(
     model: str = DEFAULT_MODEL,
     image_api_key: str = "",
     image_base_url: str = "",
+    art_style: str = "",
 ) -> list[dict]:
     """Generate character design images for all characters concurrently."""
     tasks = [
         generate_character_image(
-            char["name"], char.get("role", ""), char.get("description", ""),
-            story_id, model, image_api_key, image_base_url
+            character_name=char["name"],
+            role=char.get("role", ""),
+            description=char.get("description", ""),
+            story_id=story_id,
+            model=model,
+            image_api_key=image_api_key,
+            image_base_url=image_base_url,
+            art_style=art_style,
         )
         for char in characters
     ]

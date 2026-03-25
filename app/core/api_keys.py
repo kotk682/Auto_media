@@ -11,7 +11,7 @@
 import ipaddress
 import socket
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 from fastapi import HTTPException, Request
 from app.core.config import settings as _cfg
@@ -238,3 +238,24 @@ def llm_config_dep(request: Request) -> dict:
     """Depends：提取 LLM 配置（api_key / base_url / provider），返回 dict 供 ** 解构。"""
     keys = extract_api_keys(request)
     return resolve_llm_config(keys.llm_api_key, keys.llm_base_url, keys.llm_provider, keys.llm_model)
+
+
+def get_art_style(request: Request) -> str:
+    """从 X-Art-Style Header 读取并 URL 解码画风提示词。"""
+    raw = request.headers.get("X-Art-Style", "")
+    return unquote(raw).strip()
+
+
+def inject_art_style(prompt: str, art_style: str) -> str:
+    """Append art style to end of prompt (content first, style weight second)."""
+    if not art_style or not prompt:
+        return prompt
+    normalized_prompt = prompt.rstrip()
+    normalized_style = art_style.strip()
+    if not normalized_style:
+        return normalized_prompt
+    if normalized_prompt.endswith(normalized_style):
+        return normalized_prompt
+    if f", {normalized_style}" in normalized_prompt:
+        return normalized_prompt
+    return f"{normalized_prompt}, {normalized_style}"

@@ -24,6 +24,7 @@
             :characters="store.characters"
             :relationships="store.relationships"
           />
+          <ArtStyleSelector />
           <CharacterDesign
             v-if="store.characters.length"
             :characters="store.characters"
@@ -72,6 +73,7 @@ import CharacterGraph from '../components/CharacterGraph.vue'
 import CharacterDesign from '../components/CharacterDesign.vue'
 import ApiKeyModal from '../components/ApiKeyModal.vue'
 import OutlineChatPanel from '../components/OutlineChatPanel.vue'
+import ArtStyleSelector from '../components/ArtStyleSelector.vue'
 import { useStoryStore } from '../stores/story.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { streamScript } from '../api/story.js'

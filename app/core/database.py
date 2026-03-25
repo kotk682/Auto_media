@@ -31,3 +31,11 @@ async def init_db():
         if await conn.run_sync(_column_missing):
             await conn.execute(text("ALTER TABLE stories ADD COLUMN character_images JSON"))
             logger.info("Migration applied: added character_images column to stories table")
+
+        def _art_style_missing(sync_conn):
+            return "art_style" not in {
+                col["name"] for col in inspect(sync_conn).get_columns("stories")
+            }
+        if await conn.run_sync(_art_style_missing):
+            await conn.execute(text("ALTER TABLE stories ADD COLUMN art_style TEXT DEFAULT ''"))
+            logger.info("Migration applied: added art_style column to stories table")

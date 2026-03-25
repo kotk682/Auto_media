@@ -69,11 +69,12 @@ class PatchStoryRequest(BaseModel):
     story_id: str
     characters: Optional[List[Character]] = None
     outline: Optional[List[OutlineScene]] = None
+    art_style: Optional[str] = None
 
     @model_validator(mode="after")
     def at_least_one_field(self) -> "PatchStoryRequest":
-        if self.characters is None and self.outline is None:
-            raise ValueError("至少需要提供 characters 或 outline 之一")
+        if self.characters is None and self.outline is None and self.art_style is None:
+            raise ValueError("至少需要提供 characters、outline 或 art_style 之一")
         return self
 
 

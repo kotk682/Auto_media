@@ -10,6 +10,7 @@ from app.schemas.pipeline import GenerationStrategy, PipelineStatus
 from app.services import tts, image, video, ffmpeg
 from app.services.storyboard import parse_script_to_storyboard
 from app.services import story_repository as repo
+from app.core.api_keys import inject_art_style
 
 
 class PipelineExecutor:
@@ -23,6 +24,7 @@ class PipelineExecutor:
         self.results: List[dict] = []
         self.base_url: str = ""
         self.character_info: Optional[dict] = None
+        self.art_style: str = ""
 
     async def run_full_pipeline(
         self,
@@ -42,10 +44,12 @@ class PipelineExecutor:
         video_base_url: str = "",
         video_provider: str = "dashscope",
         character_info: Optional[dict] = None,
+        art_style: str = "",
     ):
         """执行完整的生成流水线"""
         self.base_url = base_url
         self.character_info = character_info
+        self.art_style = art_style
         try:
             # Step 1: 分镜解析
             await self._update_state(
@@ -84,7 +88,6 @@ class PipelineExecutor:
                 await self._run_integrated_strategy(
                     image_model, video_model, base_url, image_api_key, image_base_url, video_api_key, video_base_url, video_provider
                 )
-
             # Step 5: FFmpeg 合成（分离式和链式策略需要）
             if strategy in (GenerationStrategy.SEPARATED, GenerationStrategy.CHAINED):
                 await self._stitch_videos()
@@ -158,7 +161,7 @@ class PipelineExecutor:
             shots=[
                 {
                     "shot_id": s.shot_id,
-                    "visual_prompt": self._enhance_prompt_with_character(s.final_video_prompt, self.character_info),
+                    "visual_prompt": self._build_generation_prompt(s),
                 }
                 for s in self.shots
             ],
@@ -190,7 +193,7 @@ class PipelineExecutor:
                 {
                     "shot_id": s.shot_id,
                     "image_url": image_map[s.shot_id]["image_url"],
-                    "final_video_prompt": s.final_video_prompt,
+                    "final_video_prompt": self._build_generation_prompt(s),
                 }
                 for s in self.shots
                 if s.shot_id in image_map
@@ -261,6 +264,13 @@ class PipelineExecutor:
             return visual_prompt
         return f"{visual_prompt} {' '.join(additions)}"
 
+    def _build_generation_prompt(self, shot: Shot) -> str:
+        """统一图片与视频生成 prompt，避免同镜头在不同阶段条件漂移。"""
+        return inject_art_style(
+            self._enhance_prompt_with_character(shot.final_video_prompt, self.character_info),
+            self.art_style,
+        )
+
     async def _run_chained_strategy(
         self,
         voice: str,
@@ -315,10 +325,9 @@ class PipelineExecutor:
         # 构建 shots 数据并增强 prompt
         shots_data = []
         for s in self.shots:
-            enhanced_prompt = self._enhance_prompt_with_character(s.final_video_prompt, self.character_info)
             shots_data.append({
                 "shot_id": s.shot_id,
-                "final_video_prompt": enhanced_prompt,
+                "final_video_prompt": self._build_generation_prompt(s),
             })
 
         scene_groups = video.group_shots_by_scene(shots_data)
@@ -397,7 +406,10 @@ class PipelineExecutor:
         )
 
         image_results = await image.generate_images_batch(
-            shots=[{"shot_id": s.shot_id, "visual_prompt": s.final_video_prompt} for s in self.shots],
+            shots=[{
+                "shot_id": s.shot_id,
+                "visual_prompt": self._build_generation_prompt(s),
+            } for s in self.shots],
             model=image_model,
             image_api_key=image_api_key,
             image_base_url=image_base_url,
@@ -428,7 +440,7 @@ class PipelineExecutor:
                 {
                     "shot_id": s.shot_id,
                     "image_url": image_map[s.shot_id]["image_url"],
-                    "final_video_prompt": s.final_video_prompt,
+                    "final_video_prompt": self._build_generation_prompt(s),
                 }
                 for s in self.shots
                 if s.shot_id in image_map

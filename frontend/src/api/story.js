@@ -1,12 +1,14 @@
 import { useSettingsStore } from '../stores/settings.js'
+import { useStoryStore } from '../stores/story.js'
 
 /**
  * 统一 Header 构建：
  * - LLM 相关：优先使用文本生成专用 Key，回退到默认 LLM Key
  * - 图片/视频：优先使用专用 Key，回退到默认 Key
  */
-function getHeaders() {
+export function getHeaders() {
   const settings = useSettingsStore()
+  const story = useStoryStore()
   const headers = { 'Content-Type': 'application/json' }
   if (!settings.useMock) {
     if (settings.effectiveLlmApiKey)   headers['X-LLM-API-Key']    = settings.effectiveLlmApiKey
@@ -23,6 +25,7 @@ function getHeaders() {
   if (settings.effectiveVideoProvider) headers['X-Video-Provider'] = settings.effectiveVideoProvider
   if (settings.effectiveVideoApiKey)  headers['X-Video-API-Key']  = settings.effectiveVideoApiKey
   if (settings.effectiveVideoBaseUrl) headers['X-Video-Base-URL'] = settings.effectiveVideoBaseUrl
+  if (story.artStyle) headers['X-Art-Style'] = encodeURIComponent(story.artStyle)
   return headers
 }
 

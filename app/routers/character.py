@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.api_keys import image_config_dep
+from app.core.api_keys import image_config_dep, get_art_style
 from app.services.image import generate_character_image, generate_character_images_batch, DEFAULT_MODEL
 from app.services import story_repository as repo
 
@@ -41,8 +41,9 @@ class BatchCharacterResponse(BaseModel):
 
 
 @router.post("/generate", response_model=CharacterImageResult)
-async def generate_single(body: CharacterImageRequest, image_config: dict = Depends(image_config_dep), db: AsyncSession = Depends(get_db)):
+async def generate_single(body: CharacterImageRequest, request: Request, image_config: dict = Depends(image_config_dep), db: AsyncSession = Depends(get_db)):
     """Generate character design image for a single character."""
+    art_style = get_art_style(request)
     try:
         result = await generate_character_image(
             character_name=body.character_name,
@@ -50,6 +51,7 @@ async def generate_single(body: CharacterImageRequest, image_config: dict = Depe
             description=body.description,
             story_id=body.story_id,
             model=body.model or DEFAULT_MODEL,
+            art_style=art_style,
             **image_config,
         )
     except Exception as e:
@@ -62,6 +64,8 @@ async def generate_single(body: CharacterImageRequest, image_config: dict = Depe
             "prompt": result["prompt"],
         }
     })
+    if art_style:
+        await repo.save_story(db, body.story_id, {"art_style": art_style})
 
     return CharacterImageResult(
         character_name=result["character_name"],
@@ -71,13 +75,15 @@ async def generate_single(body: CharacterImageRequest, image_config: dict = Depe
 
 
 @router.post("/generate-all", response_model=BatchCharacterResponse)
-async def generate_all(body: BatchCharacterRequest, image_config: dict = Depends(image_config_dep), db: AsyncSession = Depends(get_db)):
+async def generate_all(body: BatchCharacterRequest, request: Request, image_config: dict = Depends(image_config_dep), db: AsyncSession = Depends(get_db)):
     """Generate character design images for all characters."""
+    art_style = get_art_style(request)
     try:
         raw_results = await generate_character_images_batch(
             characters=body.characters,
             story_id=body.story_id,
             model=body.model or DEFAULT_MODEL,
+            art_style=art_style,
             **image_config,
         )
     except Exception as e:
@@ -108,6 +114,8 @@ async def generate_all(body: BatchCharacterRequest, image_config: dict = Depends
         raise HTTPException(status_code=500, detail=f"所有角色人设图生成失败: {errors[0].error if errors else '未知错误'}")
 
     await repo.upsert_character_images(db, body.story_id, new_images)
+    if art_style:
+        await repo.save_story(db, body.story_id, {"art_style": art_style})
     return BatchCharacterResponse(results=valid_results, errors=errors)
 
 

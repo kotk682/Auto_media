@@ -7,6 +7,7 @@ from typing import Callable, Optional
 
 import httpx
 
+from app.core.api_keys import inject_art_style
 from app.services.video_providers.factory import get_video_provider
 from app.services.ffmpeg import extract_last_frame
 
@@ -53,6 +54,7 @@ async def generate_videos_batch(
     video_api_key: str = "",
     video_base_url: str = "",
     video_provider: str = DEFAULT_PROVIDER,
+    art_style: str = "",
 ) -> list[dict]:
     """
     Generate videos for all shots concurrently.
@@ -62,7 +64,7 @@ async def generate_videos_batch(
     tasks = [
         generate_video(
             image_url=f"{base_url}{shot['image_url']}",
-            prompt=shot.get("final_video_prompt") or shot.get("visual_prompt", ""),
+            prompt=inject_art_style(shot.get("final_video_prompt") or shot.get("visual_prompt", ""), art_style),
             shot_id=shot["shot_id"],
             model=model,
             video_api_key=video_api_key,

@@ -290,6 +290,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSettingsStore } from '../stores/settings.js'
 import { useStoryStore } from '../stores/story.js'
+import { getHeaders } from '../api/story.js'
 import StepIndicator from '../components/StepIndicator.vue'
 import ApiKeyModal from '../components/ApiKeyModal.vue'
 
@@ -718,23 +719,6 @@ function getMediaUrl(path) {
   if (!path) return ''
   if (path.startsWith('http')) return path
   return `${getBackendUrl()}${path}`
-}
-
-function getHeaders() {
-  const headers = {}
-  if (settings.effectiveLlmApiKey)    headers['X-LLM-API-Key']    = settings.effectiveLlmApiKey
-  if (settings.effectiveLlmBaseUrl)   headers['X-LLM-Base-URL']   = settings.effectiveLlmBaseUrl
-  if (settings.effectiveLlmProvider)  headers['X-LLM-Provider']   = settings.effectiveLlmProvider
-  if (settings.effectiveScriptModel)    headers['X-Script-Model']    = settings.effectiveScriptModel
-  if (settings.effectiveScriptProvider) headers['X-Script-Provider'] = settings.effectiveScriptProvider
-  if (settings.effectiveScriptApiKey)   headers['X-Script-API-Key']  = settings.effectiveScriptApiKey
-  if (settings.effectiveScriptBaseUrl)  headers['X-Script-Base-URL'] = settings.effectiveScriptBaseUrl
-  if (settings.effectiveImageApiKey)  headers['X-Image-API-Key']  = settings.effectiveImageApiKey
-  if (settings.effectiveImageBaseUrl) headers['X-Image-Base-URL'] = settings.effectiveImageBaseUrl
-  if (settings.effectiveVideoApiKey)    headers['X-Video-API-Key']    = settings.effectiveVideoApiKey
-  if (settings.effectiveVideoBaseUrl)   headers['X-Video-Base-URL']   = settings.effectiveVideoBaseUrl
-  if (settings.effectiveVideoProvider)  headers['X-Video-Provider']   = settings.effectiveVideoProvider
-  return headers
 }
 
 // TTS/Image/Video 生成函数

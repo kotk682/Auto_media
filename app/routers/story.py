@@ -111,6 +111,8 @@ async def api_patch(req: PatchStoryRequest, db: AsyncSession = Depends(get_db)):
         fields["characters"] = req.characters
     if req.outline is not None:
         fields["outline"] = req.outline
+    if req.art_style is not None:
+        fields["art_style"] = req.art_style
     if fields:
         await repo.save_story(db, req.story_id, fields)
     return {"ok": True}

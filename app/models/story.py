@@ -21,6 +21,7 @@ class Story(Base):
     wb_history = Column(JSON)  # List[dict] - world building history
     wb_turn = Column(Integer, default=0)
     character_images = Column(JSON)  # dict - character name -> image info
+    art_style = Column(Text, default="")  # 画风提示词
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

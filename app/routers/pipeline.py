@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Body, Depe
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.config import settings as _cfg
-from app.core.api_keys import extract_api_keys, resolve_image_key, image_config_dep, video_config_dep, llm_config_dep, validate_user_base_url, resolve_llm_config
+from app.core.api_keys import extract_api_keys, resolve_image_key, image_config_dep, video_config_dep, llm_config_dep, validate_user_base_url, resolve_llm_config, get_art_style
 from app.schemas.pipeline import (
     PipelineStatusResponse,
     PipelineStatus,
@@ -71,6 +71,7 @@ async def auto_generate(
     video_api_key = video_cfg["video_api_key"]
     video_base_url = video_cfg["video_base_url"]
     video_provider = video_cfg["video_provider"]
+    art_style = req.art_style or get_art_style(request)
 
     async def _run_pipeline():
         """后台执行流水线"""
@@ -120,6 +121,7 @@ async def auto_generate(
                 video_base_url=video_base_url,
                 video_provider=video_provider,
                 character_info=character_info,
+                art_style=art_style,
             )
 
     background_tasks.add_task(_run_pipeline)
@@ -210,6 +212,7 @@ async def generate_storyboard(
 @router.post("/{project_id}/generate-assets")
 async def generate_assets(
     project_id: str,
+    request: Request,
     storyboard: Storyboard,
     image_config: dict = Depends(image_config_dep),
     voice: str = Query("zh-CN-XiaoxiaoNeural", description="TTS 语音"),
@@ -235,6 +238,7 @@ async def generate_assets(
 
     shots = storyboard.shots
     total = len(shots)
+    art_style = get_art_style(request)
 
     async def _generate():
         """后台生成任务"""
@@ -254,6 +258,7 @@ async def generate_assets(
             image_results = await image.generate_images_batch(
                 shots=[{"shot_id": s.shot_id, "final_video_prompt": s.final_video_prompt} for s in shots],
                 model=image_model,
+                art_style=art_style,
                 **image_config,
             )
 
@@ -280,6 +285,7 @@ async def generate_assets(
 @router.post("/{project_id}/render-video")
 async def render_video(
     project_id: str,
+    request: Request,
     shots_data: list[dict],
     video_config: dict = Depends(video_config_dep),
     base_url: str = Query("http://localhost:8000", description="服务器地址"),
@@ -302,6 +308,7 @@ async def render_video(
         progress=65,
         current_step="图生视频中",
     )
+    art_style = get_art_style(request)
 
     async def _render():
         """后台渲染任务"""
@@ -313,6 +320,7 @@ async def render_video(
                 shots=shots_data,
                 base_url=base_url,
                 model=video_model,
+                art_style=art_style,
                 **video_config,
             )
 

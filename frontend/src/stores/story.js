@@ -19,6 +19,7 @@ export const useStoryStore = defineStore('story', {
     shots: [],
     usage: { prompt_tokens: 0, completion_tokens: 0 },
     characterImages: {},
+    artStyle: '',
     wbHistory: [],
     wbTurn: 0,
     wbCurrentQuestion: null,
@@ -28,6 +29,14 @@ export const useStoryStore = defineStore('story', {
   },
   actions: {
     setSelectedSetting(val) { this.selectedSetting = val },
+    setArtStyle(val) {
+      if (typeof val !== 'string') {
+        this.artStyle = ''
+        return
+      }
+      const normalized = val.trim()
+      this.artStyle = normalized.length ? normalized : ''
+    },
     setStep(n) { this.currentStep = n },
     setInput(idea, genre, tone) { this.input = { idea, genre, tone } },
     setAnalyzeResult({ story_id, analysis, suggestions, placeholder, usage }) {
@@ -106,6 +115,7 @@ export const useStoryStore = defineStore('story', {
       this.outline = storyData.outline || []
       this.scenes = storyData.scenes || []
       this.characterImages = storyData.character_images || {}
+      this.setArtStyle(storyData.art_style || '')
       this.wbHistory = storyData.wb_history || []
       this.wbTurn = storyData.wb_turn || 0
       this.step3Done = (storyData.scenes || []).length > 0
@@ -128,6 +138,7 @@ export const useStoryStore = defineStore('story', {
         this.shots = []
         this.step3Done = false
         this.selectedSetting = ''
+        this.artStyle = ''
       }
       this.storyId = story_id
       this.wbTurn = turn
