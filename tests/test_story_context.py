@@ -4,11 +4,11 @@ from unittest.mock import patch
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.database import Base
-from app.core.story_context import build_generation_payload, build_story_context
+from app.core.story_context import build_generation_payload, build_story_context, character_appears_in_shot
 from app.models.story import Story
 from app.schemas.storyboard import AudioReference, CameraSetup, Shot, VisualElements
 from app.services import story_repository as repo
-from app.services.story_context_service import prepare_story_context
+from app.services.story_context_service import prepare_story_context, _parse_json
 from app.services.storyboard import parse_script_to_storyboard
 
 
@@ -71,6 +71,39 @@ class StoryContextTests(unittest.TestCase):
         self.assertNotIn("江南水乡", payload["final_video_prompt"])
         self.assertIn("last_frame_prompt", payload)
         self.assertNotEqual(payload["image_prompt"], payload["final_video_prompt"])
+
+    def test_character_matching_avoids_substring_false_positive(self):
+        story = {
+            "characters": [
+                {"name": "Ann", "role": "support", "description": "short hair"},
+                {"name": "Anna", "role": "lead", "description": "long hair"},
+            ],
+            "meta": {
+                "character_appearance_cache": {
+                    "Ann": {"negative_prompt": "ann-only"},
+                    "Anna": {"negative_prompt": "anna-only"},
+                }
+            },
+        }
+        shot = {
+            "storyboard_description": "Anna opens the door and looks back.",
+            "negative_prompt": "low quality, blur",
+        }
+
+        ctx = build_story_context(story)
+        payload = build_generation_payload(shot, ctx)
+
+        self.assertFalse(character_appears_in_shot("Ann", shot))
+        self.assertTrue(character_appears_in_shot("Anna", shot))
+        self.assertEqual(payload["negative_prompt"], "low quality, blur, anna-only")
+
+    def test_character_matching_prefers_structured_names(self):
+        shot = {
+            "storyboard_description": "",
+            "characters": [{"name": "Li Ming"}],
+        }
+        self.assertTrue(character_appears_in_shot("Li Ming", shot))
+        self.assertFalse(character_appears_in_shot("Li", shot))
 
 
 class ParseStoryboardOverrideTests(unittest.IsolatedAsyncioTestCase):
@@ -216,6 +249,23 @@ class StoryContextPreparationTests(unittest.IsolatedAsyncioTestCase):
             payload = build_generation_payload(shot, ctx)
             self.assertIn("jiangnan river town", payload["image_prompt"])
             self.assertIn("modern clothing", payload["negative_prompt"])
+
+
+class StoryContextServiceParsingTests(unittest.TestCase):
+    def test_parse_json_extracts_first_fenced_block(self):
+        content = """
+        Intro text
+        ```json
+        {"characters": {"Li Ming": {"body": "short black hair"}}}
+        ```
+        ```json
+        {"ignored": true}
+        ```
+        """.strip()
+
+        parsed = _parse_json(content)
+
+        self.assertEqual(parsed["characters"]["Li Ming"]["body"], "short black hair")
 
 
 class StoryRepositoryHelperTests(unittest.IsolatedAsyncioTestCase):

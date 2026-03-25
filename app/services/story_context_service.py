@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import json
 import re
 from typing import Any, Mapping
@@ -9,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.story_context import StoryContext, build_story_context
 from app.services import story_repository as repo
 from app.services.llm.factory import get_llm_provider
+
+
+_logger = logging.getLogger(__name__)
 
 
 APPEARANCE_SYSTEM_PROMPT = """
@@ -68,11 +72,11 @@ def _trim_words(text: str, limit: int) -> str:
 
 def _parse_json(content: str) -> dict[str, Any]:
     normalized = content.strip()
-    if normalized.startswith("```"):
-        parts = normalized.split("```")
-        normalized = parts[1] if len(parts) > 1 else parts[0]
-        if normalized.startswith("json"):
-            normalized = normalized[4:]
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", normalized, flags=re.IGNORECASE)
+    if fenced:
+        normalized = fenced.group(1)
+    elif normalized.startswith("```"):
+            normalized = re.sub(r"^```(?:json)?\s*", "", normalized, flags=re.IGNORECASE)
     return json.loads(normalized.strip())
 
 
@@ -262,7 +266,7 @@ async def prepare_story_context(
                 await _project_visual_dna(db, story_id, story, appearance_cache)
                 story = await repo.get_story(db, story_id)
         except Exception:
-            pass
+            _logger.exception("Failed to extract character appearance cache for story_id=%s", story_id)
 
     if can_call_llm and _needs_scene_style_cache(story):
         try:
@@ -277,6 +281,6 @@ async def prepare_story_context(
                 await repo.upsert_story_meta_cache(db, story_id, "scene_style_cache", styles)
                 story = await repo.get_story(db, story_id)
         except Exception:
-            pass
+            _logger.exception("Failed to extract scene style cache for story_id=%s", story_id)
 
     return story, build_story_context(story)

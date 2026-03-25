@@ -178,19 +178,24 @@ async def remove_story_meta_keys(
 ) -> None:
     if not keys:
         return
-    for key in keys:
-        result = await _execute_with_sqlite_retry(
-            db,
-            text(
-                "UPDATE stories "
-                "SET meta = json_remove(COALESCE(meta, '{}'), :path) "
-                "WHERE id = :story_id"
-            ),
-            {"path": f"$.{key}", "story_id": story_id},
-            retries=retries,
-        )
-        if result.rowcount == 0:
-            raise ValueError(f"Story {story_id} not found")
+    path_placeholders = []
+    params = {"story_id": story_id}
+    for idx, key in enumerate(keys):
+        param_name = f"path{idx}"
+        path_placeholders.append(f":{param_name}")
+        params[param_name] = f"$.{key}"
+    result = await _execute_with_sqlite_retry(
+        db,
+        text(
+            "UPDATE stories "
+            f"SET meta = json_remove(COALESCE(meta, '{{}}'), {', '.join(path_placeholders)}) "
+            "WHERE id = :story_id"
+        ),
+        params,
+        retries=retries,
+    )
+    if result.rowcount == 0:
+        raise ValueError(f"Story {story_id} not found")
     await db.commit()
 
 

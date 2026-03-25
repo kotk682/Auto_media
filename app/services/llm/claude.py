@@ -1,7 +1,6 @@
 import anthropic
 from app.services.llm.base import BaseLLMProvider, estimate_tokens
 
-
 class ClaudeProvider(BaseLLMProvider):
     def __init__(self, api_key: str, base_url: str = "https://api.anthropic.com", model: str = "claude-sonnet-4-6"):
         self._client = anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
@@ -62,10 +61,9 @@ class ClaudeProvider(BaseLLMProvider):
         system: str = "",
         temperature: float = 0.3,
         enable_caching: bool = False,
-        cache_key: str = "",
+        _cache_key: str = "",
         cache_threshold_tokens: int = 1024,
     ) -> tuple[str, dict]:
-        del cache_key
         stable_token_budget = sum(
             estimate_tokens(message)
             for message in messages
@@ -91,7 +89,6 @@ class ClaudeProvider(BaseLLMProvider):
             temperature=temperature,
             system=system,
             messages=request_messages,
-            extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"} if use_caching else None,
         )
         usage_obj = getattr(msg, "usage", None)
         usage = {

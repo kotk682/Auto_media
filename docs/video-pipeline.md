@@ -10,7 +10,7 @@
 
 > 说明：本文中较早出现的 `build_final_prompt()` 属于设计期命名。按照当前仓库实现，更接近真实代码边界的入口是 `app/core/story_context.py` 中的 `build_generation_payload()`，由 `PipelineExecutor`、`image.py`、`video.py` 等链路复用。
 
-```
+```text
 分镜 JSON (Shot List)
   │
   ├─ 0. StoryContext 构建 ─── 角色锁、画风、场景风格、negative prompt 汇总

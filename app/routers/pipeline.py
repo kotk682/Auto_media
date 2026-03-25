@@ -189,7 +189,7 @@ async def generate_storyboard(
     try:
         # 获取角色信息（如果提供了 story_id）
         character_info = None
-        _, story_context = await _load_story_context(
+        story, story_context = await _load_story_context(
             db,
             req.story_id,
             provider=provider,
@@ -197,19 +197,14 @@ async def generate_storyboard(
             api_key=script_llm["api_key"],
             base_url=script_llm["base_url"],
         )
-        if req.story_id:
-            try:
-                story = await repo.get_story(db, req.story_id)
-                if story:
-                    characters = story.get("characters", [])
-                    character_images = story.get("character_images", {})
-                    if characters:
-                        character_info = {
-                            "characters": characters,
-                            "character_images": character_images or {},
-                        }
-            except Exception:
-                pass  # 降级：无角色信息但不报错
+        if story:
+            characters = story.get("characters", [])
+            character_images = story.get("character_images", {})
+            if characters:
+                character_info = {
+                    "characters": characters,
+                    "character_images": character_images or {},
+                }
 
         shots, usage = await parse_script_to_storyboard(
             req.script,

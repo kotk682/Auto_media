@@ -193,6 +193,9 @@
       <div v-if="error" class="error-message">
         ❌ {{ error }}
       </div>
+      <div v-if="transitionMessage" class="info-message">
+        {{ transitionMessage }}
+      </div>
 
       <!-- API Key Modal -->
       <ApiKeyModal
@@ -378,6 +381,7 @@ const manualOverride = ref(false)
 const isParsing = ref(false)
 const isGenerating = ref(false)
 const error = ref('')
+const transitionMessage = ref('')
 const shots = computed(() => storyStore.shots)
 const voices = ref([])
 const selectedVoice = ref('')
@@ -579,6 +583,7 @@ function processFile(file) {
     }
     uploadedScript.value = text.trim()
     error.value = ''
+    transitionMessage.value = ''
     storyStore.clearShots()
   }
   reader.readAsText(file)
@@ -651,6 +656,7 @@ async function parseStoryboard() {
 
   isParsing.value = true
   error.value = ''
+  transitionMessage.value = ''
   storyStore.clearShots()
   progress.value = { show: true, label: '正在调用 LLM 解析分镜...', percent: 20 }
 
@@ -838,10 +844,10 @@ function hasSpeechAudio(shot) {
 function previewTransitionSlot(item) {
   if (!item?.fromShot || !item?.toShot) return
   if (item.ready) {
-    error.value = `过渡视频 UI 已预留：${item.fromShot.shot_id} -> ${item.toShot.shot_id}。当前版本仅展示前端界面，后端生成接口暂未接入。`
+    transitionMessage.value = `过渡视频 UI 已预留：${item.fromShot.shot_id} -> ${item.toShot.shot_id}。当前版本仅展示前端界面，后端生成接口暂未接入。`
     return
   }
-  error.value = `过渡槽位尚未就绪：请先为 ${item.fromShot.shot_id} 生成视频，并为 ${item.toShot.shot_id} 生成图片或视频。`
+  transitionMessage.value = `过渡槽位尚未就绪：请先为 ${item.fromShot.shot_id} 生成视频，并为 ${item.toShot.shot_id} 生成图片或视频。`
 }
 
 async function generateOneTTS(shotId) {
@@ -997,6 +1003,7 @@ async function concatAllVideos() {
   concatLoading.value = true
   concatVideoUrl.value = ''
   error.value = ''
+  transitionMessage.value = ''
 
   try {
     const projectId = generateUniqueId()
@@ -1662,6 +1669,17 @@ button:disabled {
   max-width: 600px;
   background: #fff;
   border-left: 4px solid #e53935;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.info-message {
+  color: #1d4ed8;
+  font-size: 13px;
+  margin-top: 16px;
+  max-width: 600px;
+  background: #eff6ff;
+  border-left: 4px solid #60a5fa;
   border-radius: 8px;
   padding: 12px;
 }

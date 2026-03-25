@@ -29,6 +29,7 @@ async def generate_video(
     video_base_url: str = "",
     video_provider: str = DEFAULT_PROVIDER,
     last_frame_url: str = "",
+    negative_prompt: str = "",
 ) -> dict:
     """Generate video for a single shot.
 
@@ -47,7 +48,13 @@ async def generate_video(
     """
     provider = get_video_provider(video_provider)
     remote_url = await provider.generate(
-        image_url, prompt, model, video_api_key, video_base_url, last_frame_url
+        image_url,
+        prompt,
+        model,
+        video_api_key,
+        video_base_url,
+        last_frame_url,
+        negative_prompt,
     )
 
     async with httpx.AsyncClient(timeout=60) as client:
@@ -91,6 +98,7 @@ async def generate_videos_batch(
             video_base_url=video_base_url,
             video_provider=video_provider,
             last_frame_url=f"{base_url}{shot['last_frame_url']}" if shot.get("last_frame_url") else "",
+            negative_prompt=shot.get("negative_prompt", ""),
         )
         for shot in shots
         if shot.get("image_url")
@@ -188,6 +196,7 @@ async def generate_videos_chained(
                 video_api_key=video_api_key,
                 video_base_url=video_base_url,
                 video_provider=video_provider,
+                negative_prompt=shot.get("negative_prompt", ""),
             )
 
             # 提取最后一帧供下一镜头使用

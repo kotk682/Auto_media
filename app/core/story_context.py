@@ -326,33 +326,92 @@ def _get_visual_field(shot: ShotLike, field: str) -> str:
 ShotLike = Mapping[str, Any] | Any
 
 
-def character_appears_in_shot(name: str, shot: ShotLike) -> bool:
-    haystack = " ".join(
-        [
-            str(_shot_field(shot, "storyboard_description", "")),
-            str(_shot_field(shot, "image_prompt", "")),
-            str(_shot_field(shot, "final_video_prompt", "")),
-            str(_shot_field(shot, "last_frame_prompt", "")),
-            _get_visual_field(shot, "subject_and_clothing"),
-            _get_visual_field(shot, "action_and_expression"),
-            _get_visual_field(shot, "environment_and_props"),
-        ]
+def _shot_character_names(shot: ShotLike) -> list[str]:
+    for field in ("characters", "character_names", "mentioned_characters", "cast", "participants"):
+        raw = _shot_field(shot, field, None)
+        if raw is None:
+            continue
+        if isinstance(raw, str):
+            values = [raw]
+        elif isinstance(raw, (list, tuple, set)):
+            values = list(raw)
+        else:
+            continue
+
+        names: list[str] = []
+        for value in values:
+            if isinstance(value, Mapping):
+                candidate = value.get("name", "")
+            else:
+                candidate = value
+            normalized = _collapse_spaces(str(candidate))
+            if normalized:
+                names.append(normalized)
+        if names:
+            return names
+    return []
+
+
+def _shot_text_haystack(shot: ShotLike, *, include_last_frame: bool = True) -> str:
+    parts = [
+        str(_shot_field(shot, "storyboard_description", "")),
+        str(_shot_field(shot, "image_prompt", "")),
+        str(_shot_field(shot, "final_video_prompt", "")),
+        _get_visual_field(shot, "subject_and_clothing"),
+        _get_visual_field(shot, "action_and_expression"),
+        _get_visual_field(shot, "environment_and_props"),
+    ]
+    if include_last_frame:
+        parts.append(str(_shot_field(shot, "last_frame_prompt", "")))
+    return _collapse_spaces(" ".join(parts))
+
+
+def _safe_name_match(name: str, haystack: str) -> bool:
+    normalized_name = _collapse_spaces(name)
+    normalized_haystack = _collapse_spaces(haystack)
+    if not normalized_name or not normalized_haystack:
+        return False
+
+    if re.search(r"\b" + re.escape(normalized_name) + r"\b", normalized_haystack, flags=re.IGNORECASE):
+        return True
+
+    # Fallback for CJK names where \b does not split between adjacent ideographs.
+    return bool(
+        re.search(
+            r"(?<![A-Za-z0-9_])" + re.escape(normalized_name) + r"(?![A-Za-z0-9_])",
+            normalized_haystack,
+            flags=re.IGNORECASE,
+        )
     )
-    return name.lower() in haystack.lower()
+
+
+def character_appears_in_shot(name: str, shot: ShotLike) -> bool:
+    normalized_name = _collapse_spaces(name)
+    if not normalized_name:
+        return False
+
+    structured_names = _shot_character_names(shot)
+    if structured_names:
+        return any(candidate.casefold() == normalized_name.casefold() for candidate in structured_names)
+
+    return _safe_name_match(normalized_name, _shot_text_haystack(shot))
 
 
 def should_inject_clothing_for(name: str, shot: ShotLike) -> bool:
-    haystack = " ".join(
-        [
-            str(_shot_field(shot, "storyboard_description", "")),
-            str(_shot_field(shot, "image_prompt", "")),
-            str(_shot_field(shot, "final_video_prompt", "")),
-            _get_visual_field(shot, "action_and_expression"),
-        ]
-    ).lower()
-    if name.lower() not in haystack:
+    haystack = _collapse_spaces(
+        " ".join(
+            [
+                str(_shot_field(shot, "storyboard_description", "")),
+                str(_shot_field(shot, "image_prompt", "")),
+                str(_shot_field(shot, "final_video_prompt", "")),
+                _get_visual_field(shot, "action_and_expression"),
+            ]
+        )
+    )
+    if not _safe_name_match(name, haystack):
         return False
-    return not any(hint in haystack for hint in _WARDROBE_CHANGE_HINTS)
+    lowered_haystack = haystack.lower()
+    return not any(hint in lowered_haystack for hint in _WARDROBE_CHANGE_HINTS)
 
 
 def _appearance_prefix(shot: ShotLike, ctx: StoryContext, include_clothing: bool = True) -> str:
@@ -415,11 +474,22 @@ def _merge_prompt(base_prompt: str, appearance_prefix: str, scene_extra: str, ar
     return inject_art_style(merged, art_style)
 
 
+def _split_negative_terms(negative: str) -> list[str]:
+    return [
+        _collapse_spaces(term)
+        for term in re.split(r"[,，]", negative)
+        if _collapse_spaces(term)
+    ]
+
+
 def build_negative_prompt(shot: ShotLike, ctx: StoryContext | None) -> str:
+    shot_negative_prompt = _collapse_spaces(str(_shot_field(shot, "negative_prompt", "")))
     if not ctx:
-        return _collapse_spaces(str(_shot_field(shot, "negative_prompt", "")))
+        return shot_negative_prompt
 
     negatives: list[str] = []
+    if shot_negative_prompt:
+        negatives.append(shot_negative_prompt)
     if ctx.global_negative_prompt:
         negatives.append(ctx.global_negative_prompt)
     for name, lock in ctx.character_locks.items():
@@ -427,11 +497,7 @@ def build_negative_prompt(shot: ShotLike, ctx: StoryContext | None) -> str:
             negatives.append(lock.negative_prompt)
     normalized_terms: list[str] = []
     for negative in negatives:
-        normalized_terms.extend(
-            _collapse_spaces(term)
-            for term in re.split(r"[,，]", negative)
-            if _collapse_spaces(term)
-        )
+        normalized_terms.extend(_split_negative_terms(negative))
     return _collapse_spaces(", ".join(dict.fromkeys(normalized_terms)))
 
 

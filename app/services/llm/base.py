@@ -1,5 +1,10 @@
+import logging
+
 from abc import ABC, abstractmethod
 from typing import Any, Iterable, Optional, Tuple
+
+
+logger = logging.getLogger(__name__)
 
 
 def _message_text(message: dict[str, Any]) -> str:
@@ -76,7 +81,12 @@ class BaseLLMProvider(ABC):
     ) -> Tuple[str, dict]:
         del enable_caching, cache_key, cache_threshold_tokens
         if not messages:
-            return await self.complete_with_usage(system, "", temperature)
+            message = (
+                "BaseLLMProvider.complete_messages_with_usage requires at least one message; "
+                "refusing to call complete_with_usage with an empty user prompt."
+            )
+            logger.warning(message)
+            raise ValueError(message)
 
         if len(messages) == 1 and messages[0].get("role") == "user":
             user = _message_text(messages[0])

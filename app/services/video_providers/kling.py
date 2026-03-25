@@ -44,6 +44,7 @@ class KlingVideoProvider(BaseVideoProvider):
         api_key: str,
         base_url: str,
         last_frame_url: str = "",
+        negative_prompt: str = "",
     ) -> str:
         """生成视频。
 
@@ -62,22 +63,34 @@ class KlingVideoProvider(BaseVideoProvider):
         token = self._make_token(api_key)
         effective_base = base_url or DEFAULT_BASE_URL
         async with httpx.AsyncClient(timeout=30) as client:
-            task_id = await self._submit(client, image_url, prompt, model, token, effective_base)
+            task_id = await self._submit(client, image_url, prompt, model, token, effective_base, negative_prompt)
         async with httpx.AsyncClient(timeout=30) as client:
             return await self._poll(client, task_id, token, effective_base)
 
-    async def _submit(self, client: httpx.AsyncClient, image_url: str, prompt: str, model: str, token: str, base_url: str) -> str:
+    async def _submit(
+        self,
+        client: httpx.AsyncClient,
+        image_url: str,
+        prompt: str,
+        model: str,
+        token: str,
+        base_url: str,
+        negative_prompt: str = "",
+    ) -> str:
+        payload = {
+            "model_name": model or "kling-v2-master",
+            "image": image_url,
+            "prompt": prompt,
+            "duration": 5,
+            "mode": "std",
+        }
+        if negative_prompt:
+            payload["negative_prompt"] = negative_prompt
         url = f"{base_url}{_SUBMIT_PATH}"
         resp = await client.post(
             url,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={
-                "model_name": model or "kling-v2-master",
-                "image": image_url,
-                "prompt": prompt,
-                "duration": 5,
-                "mode": "std",
-            },
+            json=payload,
         )
         print(f"[VIDEO KLING SUBMIT] status={resp.status_code} base={base_url}")
         if not resp.is_success:

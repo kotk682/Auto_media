@@ -13,6 +13,7 @@ class BaseVideoProvider(ABC):
         api_key: str,
         base_url: str,
         last_frame_url: str = "",
+        negative_prompt: str = "",
     ) -> str:
         """
         Submit image-to-video task and wait for completion.

@@ -82,7 +82,7 @@ async def generate_images(
                 fallback_results = await generate_images_batch(
                     [_build_basic_payload(shot, art_style) for shot in body.shots],
                     model=body.model or DEFAULT_MODEL,
-                    art_style="",
+                    art_style=art_style,
                     **image_config,
                 )
                 return fallback_results

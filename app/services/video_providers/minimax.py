@@ -28,6 +28,7 @@ class MinimaxVideoProvider(BaseVideoProvider):
         api_key: str,
         base_url: str,
         last_frame_url: str = "",
+        negative_prompt: str = "",
     ) -> str:
         """生成视频。
 
@@ -49,24 +50,45 @@ class MinimaxVideoProvider(BaseVideoProvider):
             "Content-Type": "application/json",
         }
         async with httpx.AsyncClient(timeout=60) as client:
-            task_id = await self._submit(client, image_url, prompt, model or "video-01", headers, effective_base)
+            task_id = await self._submit(
+                client,
+                image_url,
+                prompt,
+                model or "video-01",
+                headers,
+                effective_base,
+                negative_prompt,
+            )
             file_id = await self._poll(client, task_id, headers, effective_base)
             return await self._retrieve_url(client, file_id, headers, effective_base)
 
-    async def _submit(self, client: httpx.AsyncClient, image_url: str, prompt: str, model: str, headers: dict, base_url: str) -> str:
+    async def _submit(
+        self,
+        client: httpx.AsyncClient,
+        image_url: str,
+        prompt: str,
+        model: str,
+        headers: dict,
+        base_url: str,
+        negative_prompt: str = "",
+    ) -> str:
         # 如果是本地地址，先转 base64
         from app.services.video_providers.doubao import _to_data_url
         resolved_image = await _to_data_url(image_url)
+
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "first_frame_image": resolved_image,
+        }
+        if negative_prompt:
+            payload["negative_prompt"] = negative_prompt
 
         url = f"{base_url}{_SUBMIT_PATH}"
         resp = await client.post(
             url,
             headers=headers,
-            json={
-                "model": model,
-                "prompt": prompt,
-                "first_frame_image": resolved_image,
-            },
+            json=payload,
         )
         print(f"[VIDEO MINIMAX SUBMIT] status={resp.status_code} base={base_url}")
         if not resp.is_success:

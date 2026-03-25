@@ -77,8 +77,15 @@ async def refine(story_id: str, change_type: str, change_summary: str, db: Async
         updates["meta"] = {**existing_meta, "theme": data["meta_theme"]}
     if updates:
         await repo.save_story(db, story_id, updates)
-        if "characters" in updates:
-            await repo.invalidate_story_consistency_cache(db, story_id, appearance=True)
+        invalidate_appearance = "characters" in updates
+        invalidate_scene_style = "outline" in updates
+        if invalidate_appearance or invalidate_scene_style:
+            await repo.invalidate_story_consistency_cache(
+                db,
+                story_id,
+                appearance=invalidate_appearance,
+                scene_style=invalidate_scene_style,
+            )
 
     return {
         "characters": data.get("characters"),
@@ -313,6 +320,8 @@ async def apply_chat(story_id: str, change_type: str, chat_history: list, curren
                 ep["summary"] = data.get("summary", ep["summary"])
                 break
         if outline:
-            await repo.save_story(db, story_id, {"outline": outline})
+            meta = dict(story.get("meta") or {})
+            meta.pop("scene_style_cache", None)
+            await repo.save_story(db, story_id, {"outline": outline, "meta": meta})
 
     return data

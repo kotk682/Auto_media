@@ -24,6 +24,7 @@ class DashScopeVideoProvider(BaseVideoProvider):
         api_key: str,
         base_url: str,
         last_frame_url: str = "",
+        negative_prompt: str = "",
     ) -> str:
         """生成视频。
 
@@ -41,11 +42,23 @@ class DashScopeVideoProvider(BaseVideoProvider):
         # 注意：DashScope 暂不支持双帧过渡，忽略 last_frame_url
         effective_base = base_url or DEFAULT_BASE_URL
         async with httpx.AsyncClient(timeout=30) as client:
-            task_id = await self._submit(client, image_url, prompt, model, api_key, effective_base)
+            task_id = await self._submit(client, image_url, prompt, model, api_key, effective_base, negative_prompt)
         async with httpx.AsyncClient(timeout=30) as client:
             return await self._poll(client, task_id, api_key, effective_base)
 
-    async def _submit(self, client: httpx.AsyncClient, image_url: str, prompt: str, model: str, api_key: str, base_url: str) -> str:
+    async def _submit(
+        self,
+        client: httpx.AsyncClient,
+        image_url: str,
+        prompt: str,
+        model: str,
+        api_key: str,
+        base_url: str,
+        negative_prompt: str = "",
+    ) -> str:
+        input_payload = {"image_url": image_url, "prompt": prompt}
+        if negative_prompt:
+            input_payload["negative_prompt"] = negative_prompt
         url = f"{base_url}{_SUBMIT_PATH}"
         resp = await client.post(
             url,
@@ -55,7 +68,7 @@ class DashScopeVideoProvider(BaseVideoProvider):
             },
             json={
                 "model": model,
-                "input": {"image_url": image_url, "prompt": prompt},
+                "input": input_payload,
                 "parameters": {"duration": 5},
             },
         )

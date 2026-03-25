@@ -154,6 +154,7 @@ class DoubaoVideoProvider(BaseVideoProvider):
         api_key: str,
         base_url: str,
         last_frame_url: str = "",
+        negative_prompt: str = "",
     ) -> str:
         """生成视频。
 
@@ -171,7 +172,7 @@ class DoubaoVideoProvider(BaseVideoProvider):
         effective_base = base_url or DEFAULT_BASE_URL
         async with httpx.AsyncClient(timeout=30) as client:
             task_id = await self._submit(
-                client, image_url, last_frame_url, prompt, model, api_key, effective_base
+                client, image_url, last_frame_url, prompt, model, api_key, effective_base, negative_prompt
             )
         async with httpx.AsyncClient(timeout=30) as client:
             return await self._poll(client, task_id, api_key, effective_base)
@@ -185,6 +186,7 @@ class DoubaoVideoProvider(BaseVideoProvider):
         model: str,
         api_key: str,
         base_url: str,
+        negative_prompt: str = "",
     ) -> str:
         """提交视频生成任务。
 
@@ -207,8 +209,12 @@ class DoubaoVideoProvider(BaseVideoProvider):
         resolved_first = await _to_data_url(image_url)
 
         # 构建content数组
+        text_prompt = optimized_prompt
+        if negative_prompt:
+            text_prompt = f"{optimized_prompt} Avoid: {negative_prompt}."
+
         content = [
-            {"type": "text", "text": optimized_prompt},
+            {"type": "text", "text": text_prompt},
             {
                 "type": "image_url",
                 "image_url": {"url": resolved_first},
@@ -235,8 +241,8 @@ class DoubaoVideoProvider(BaseVideoProvider):
         print(f"[VIDEO DOUBAO SUBMIT] status={resp.status_code} key={mask_key(api_key)} base={base_url}")
         print(
             f"[VIDEO DOUBAO PROMPT] original_words={len(prompt.split())} "
-            f"optimized_words={len(optimized_prompt.split())} has_last_frame={bool(last_frame_url)} "
-            f"text={optimized_prompt[:220]}"
+            f"optimized_words={len(text_prompt.split())} has_last_frame={bool(last_frame_url)} "
+            f"text={text_prompt[:220]}"
         )
         if not resp.is_success:
             raise RuntimeError(f"Doubao 视频任务提交错误 {resp.status_code}: {resp.text[:200]}")

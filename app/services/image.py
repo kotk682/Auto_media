@@ -32,6 +32,13 @@ def _is_ark(base_url: str) -> bool:
     return "volces.com" in base_url or "volcengine" in base_url
 
 
+def _safe_response_json(resp: httpx.Response):
+    try:
+        return resp.json()
+    except Exception:
+        return None
+
+
 def _extract_image_url(resp) -> str:
     """Parse image URL from API response with clear error messages."""
     try:
@@ -80,16 +87,28 @@ async def generate_image(
         resp = await _submit(payload)
         print(f"[IMAGE] status={resp.status_code} key={mask_key(image_api_key)} base={base_url}")
         if not resp.is_success and negative_prompt and resp.status_code in (400, 422):
+            response_json = _safe_response_json(resp)
             logger.warning(
-                "Image provider rejected negative_prompt for shot %s, retrying without it. status=%s body=%s",
+                "Image provider rejected negative_prompt for shot %s, retrying without it. status=%s negative_prompt=%r key=%s body=%s json=%r",
                 shot_id,
                 resp.status_code,
-                resp.text[:200],
+                negative_prompt,
+                mask_key(image_api_key),
+                resp.text,
+                response_json,
             )
             retry_payload = dict(payload)
             retry_payload.pop("negative_prompt", None)
             resp = await _submit(retry_payload)
             print(f"[IMAGE][RETRY_NO_NEGATIVE] status={resp.status_code} key={mask_key(image_api_key)} base={base_url}")
+            logger.warning(
+                "Image provider retry without negative_prompt finished for shot %s. status=%s key=%s body=%s json=%r",
+                shot_id,
+                resp.status_code,
+                mask_key(image_api_key),
+                resp.text,
+                _safe_response_json(resp),
+            )
         if not resp.is_success:
             raise RuntimeError(f"图片生成 API 错误 {resp.status_code}: {resp.text[:200]}")
         image_url = _extract_image_url(resp)

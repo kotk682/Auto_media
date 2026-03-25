@@ -1,5 +1,10 @@
+import logging
+
 from openai import AsyncOpenAI
 from app.services.llm.base import BaseLLMProvider
+
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiProvider(BaseLLMProvider):
@@ -43,7 +48,13 @@ class GeminiProvider(BaseLLMProvider):
         cache_key: str = "",
         cache_threshold_tokens: int = 1024,
     ) -> tuple[str, dict]:
-        del enable_caching, cache_key, cache_threshold_tokens
+        if enable_caching:
+            logger.debug(
+                "GeminiProvider does not support prompt caching; ignoring enable_caching=%s cache_key=%r cache_threshold_tokens=%s",
+                enable_caching,
+                cache_key,
+                cache_threshold_tokens,
+            )
         request_messages = [
             {"role": message.get("role", "user"), "content": message.get("content", "")}
             for message in messages
