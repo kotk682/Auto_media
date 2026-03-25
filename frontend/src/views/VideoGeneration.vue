@@ -803,11 +803,9 @@ async function parseStoryboard() {
 }
 
 function getBackendUrl() {
-  // 开发环境使用代理，避免 CORS 问题
-  if (import.meta.env.DEV) {
-    return ''
-  }
-  return settings.backendUrl || 'http://localhost:8000'
+  const configured = settings.backendUrl?.replace(/\/$/, '')
+  if (configured) return configured
+  return 'http://localhost:8000'
 }
 
 function getMediaUrl(path) {

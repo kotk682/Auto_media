@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from typing import List, Optional
 
@@ -6,6 +7,9 @@ from app.services.llm.factory import get_llm_provider
 from app.schemas.storyboard import Shot
 from app.prompts.storyboard import SYSTEM_PROMPT, USER_TEMPLATE
 from app.prompts.character import build_character_section
+
+
+logger = logging.getLogger(__name__)
 
 _CONTINUITY_PATTERNS = (
     r"\bcontinuing\b",
@@ -605,24 +609,38 @@ async def parse_script_to_storyboard(
     """
     character_section = character_section_override or build_character_section(character_info)
     llm = get_llm_provider(provider, model=model, api_key=api_key, base_url=base_url)
-    raw, usage = await llm.complete_messages_with_usage(
-        system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": USER_TEMPLATE.format(
-                    character_section=character_section,
-                    script="[SCRIPT PROVIDED IN THE NEXT MESSAGE]",
-                ),
-                "cacheable": True,
-            },
-            {
-                "role": "user",
-                "content": f"Audio-Visual Script:\n---\n{script}\n---\n\nReturn a JSON array of shots only.",
-            },
-        ],
-        temperature=0.2,
-        enable_caching=True,
-    )
+    try:
+        raw, usage = await llm.complete_messages_with_usage(
+            system=SYSTEM_PROMPT,
+            messages=[
+                {
+                    "role": "user",
+                    "content": USER_TEMPLATE.format(
+                        character_section=character_section,
+                        script="[SCRIPT PROVIDED IN THE NEXT MESSAGE]",
+                    ),
+                    "cacheable": True,
+                },
+                {
+                    "role": "user",
+                    "content": f"Audio-Visual Script:\n---\n{script}\n---\n\nReturn a JSON array of shots only.",
+                },
+            ],
+            temperature=0.2,
+            enable_caching=True,
+        )
+    except Exception as exc:
+        resolved_base_url = base_url or "(default)"
+        logger.exception(
+            "Storyboard LLM request failed provider=%s model=%s base_url=%s script_chars=%s",
+            provider,
+            model or "(default)",
+            resolved_base_url,
+            len(script or ""),
+        )
+        raise RuntimeError(
+            f"Storyboard LLM request failed (provider={provider}, model={model or '(default)'}, "
+            f"base_url={resolved_base_url}): {exc}"
+        ) from exc
     shots = _parse_shots(raw)
     return shots, usage

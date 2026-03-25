@@ -1,4 +1,5 @@
 import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,7 @@ from app.services import story_repository as repo
 from app.core.api_keys import llm_config_dep, resolve_llm_config
 
 router = APIRouter(prefix="/api/v1/story", tags=["story"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/")
@@ -92,6 +94,12 @@ async def api_generate_script(req: GenerateScriptRequest, request: Request, llm:
                 else:
                     yield f"data: {json.dumps(scene, ensure_ascii=False)}\n\n"
         except Exception as e:
+            logger.exception(
+                "Generate script failed story_id=%s provider=%s model=%s",
+                req.story_id,
+                script_llm.get("provider", ""),
+                script_llm.get("model", ""),
+            )
             yield f"data: [ERROR] {str(e)}\n\n"
         await repo.save_story(db, req.story_id, {"scenes": scenes})
         yield "data: [DONE]\n\n"

@@ -76,7 +76,7 @@ def _parse_json(content: str) -> dict[str, Any]:
     if fenced:
         normalized = fenced.group(1)
     elif normalized.startswith("```"):
-            normalized = re.sub(r"^```(?:json)?\s*", "", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"^```(?:json)?\s*", "", normalized, flags=re.IGNORECASE)
     return json.loads(normalized.strip())
 
 

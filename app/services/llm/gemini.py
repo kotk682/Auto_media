@@ -48,6 +48,11 @@ class GeminiProvider(BaseLLMProvider):
         cache_key: str = "",
         cache_threshold_tokens: int = 1024,
     ) -> tuple[str, dict]:
+        if not messages:
+            raise ValueError(
+                "GeminiProvider.complete_messages_with_usage requires at least one message; "
+                "refusing to call the Gemini API with an empty user prompt."
+            )
         if enable_caching:
             logger.debug(
                 "GeminiProvider does not support prompt caching; ignoring enable_caching=%s cache_key=%r cache_threshold_tokens=%s",

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Body, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db, AsyncSessionLocal
@@ -22,6 +24,7 @@ from app.services.story_context_service import prepare_story_context
 from uuid import uuid4
 
 router = APIRouter(prefix="/api/v1/pipeline", tags=["pipeline"])
+logger = logging.getLogger(__name__)
 
 # 手动步进模式使用的内存状态（每个 project 一个）
 _pipeline_states: dict[str, dict] = {}
@@ -216,6 +219,13 @@ async def generate_storyboard(
             character_section_override=story_context.clean_character_section if story_context else None,
         )
     except Exception as e:
+        logger.exception(
+            "Storyboard generation failed project_id=%s story_id=%s provider=%s model=%s",
+            project_id,
+            req.story_id,
+            provider,
+            script_llm["model"] or req.model or "",
+        )
         await repo.save_pipeline(db, pipeline_id, project_id, {
             "status": PipelineStatus.FAILED,
             "error": str(e),

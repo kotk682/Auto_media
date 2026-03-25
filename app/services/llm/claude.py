@@ -36,11 +36,14 @@ class ClaudeProvider(BaseLLMProvider):
         if isinstance(content, list):
             blocks = []
             for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    block = {"type": "text", "text": str(item.get("text", ""))}
-                    if cacheable and block["text"]:
-                        block["cache_control"] = {"type": "ephemeral"}
-                    blocks.append(block)
+                if isinstance(item, dict):
+                    if item.get("type") == "text":
+                        block = {"type": "text", "text": str(item.get("text", ""))}
+                        if cacheable and block["text"]:
+                            block["cache_control"] = {"type": "ephemeral"}
+                        blocks.append(block)
+                    else:
+                        blocks.append(item)
                 else:
                     text = str(item)
                     block = {"type": "text", "text": text}
@@ -64,11 +67,13 @@ class ClaudeProvider(BaseLLMProvider):
         _cache_key: str = "",
         cache_threshold_tokens: int = 1024,
     ) -> tuple[str, dict]:
-        stable_token_budget = sum(
-            estimate_tokens(message)
-            for message in messages
-            if message.get("cacheable")
-        )
+        stable_token_budget = 0
+        if system:
+            stable_token_budget += estimate_tokens({"role": "system", "content": system})
+        for message in messages:
+            if message.get("cache_control"):
+                break
+            stable_token_budget += estimate_tokens(message)
         use_caching = enable_caching and stable_token_budget >= cache_threshold_tokens
 
         request_messages = []

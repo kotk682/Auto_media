@@ -25,6 +25,7 @@ class BaseVideoProvider(ABC):
             api_key: API密钥
             base_url: API基础URL
             last_frame_url: 尾帧图片URL（可选），提供时启用双帧过渡模式
+            negative_prompt: Optional concepts or elements to avoid in generated video output.
 
         Returns:
             Remote video URL (ready to download).

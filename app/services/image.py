@@ -39,6 +39,13 @@ def _safe_response_json(resp: httpx.Response):
         return None
 
 
+def _versioned_media_name(stem: str, suffix: str) -> str:
+    token = hashlib.md5(f"{stem}:{time.time_ns()}".encode()).hexdigest()[:8]
+    safe_stem = re.sub(r"[^A-Za-z0-9_-]", "_", stem)
+    safe_stem = re.sub(r"_+", "_", safe_stem).strip("_") or "asset"
+    return f"{safe_stem}_{token}{suffix}"
+
+
 def _extract_image_url(resp) -> str:
     """Parse image URL from API response with clear error messages."""
     try:
@@ -117,13 +124,14 @@ async def generate_image(
         img_resp = await client.get(image_url)
         img_resp.raise_for_status()
 
-    output_path = IMAGE_DIR / f"{shot_id}.png"
+    filename = _versioned_media_name(shot_id, ".png")
+    output_path = IMAGE_DIR / filename
     output_path.write_bytes(img_resp.content)
 
     return {
         "shot_id": shot_id,
         "image_path": str(output_path),
-        "image_url": f"/media/images/{shot_id}.png",
+        "image_url": f"/media/images/{filename}",
     }
 
 

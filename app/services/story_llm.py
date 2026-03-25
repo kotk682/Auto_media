@@ -1,3 +1,5 @@
+import logging
+
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
@@ -20,6 +22,9 @@ MODEL_MAP = {
     "claude":      "claude-sonnet-4-6",
     "siliconflow": "deepseek-ai/DeepSeek-V3",
 }
+
+
+logger = logging.getLogger(__name__)
 
 
 def _make_client(api_key: str, base_url: str) -> AsyncOpenAI:
@@ -201,15 +206,41 @@ async def generate_script(story_id: str, db: AsyncSession, api_key: str = "", ba
             summary=ep["summary"],
             characters_text=characters_text,
         )
-        resp = await client.chat.completions.create(
-            model=_get_model(provider, model),
-            messages=[{"role": "user", "content": prompt}],
-        )
-        if resp.usage:
-            total_prompt += resp.usage.prompt_tokens
-            total_completion += resp.usage.completion_tokens
+        resolved_model = _get_model(provider, model)
         try:
-            yield _parse_json(resp.choices[0].message.content)
+            stream = await client.chat.completions.create(
+                model=resolved_model,
+                messages=[{"role": "user", "content": prompt}],
+                stream=True,
+            )
+        except Exception as exc:
+            resolved_base_url = base_url or "(default)"
+            logger.exception(
+                "Script generation request failed story_id=%s episode=%s provider=%s model=%s base_url=%s",
+                story_id,
+                ep.get("episode"),
+                provider or "(default)",
+                resolved_model,
+                resolved_base_url,
+            )
+            raise RuntimeError(
+                f"Script generation request failed (provider={provider or '(default)'}, "
+                f"model={resolved_model}, base_url={resolved_base_url}, episode={ep.get('episode')}): {exc}"
+            ) from exc
+
+        chunks = []
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                chunks.append(delta)
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                total_prompt += getattr(usage, "prompt_tokens", 0) or 0
+                total_completion += getattr(usage, "completion_tokens", 0) or 0
+
+        content = "".join(chunks)
+        try:
+            yield _parse_json(content)
         except Exception:
             yield {"episode": ep["episode"], "title": ep["title"], "scenes": []}
 
@@ -320,8 +351,11 @@ async def apply_chat(story_id: str, change_type: str, chat_history: list, curren
                 ep["summary"] = data.get("summary", ep["summary"])
                 break
         if outline:
-            meta = dict(story.get("meta") or {})
-            meta.pop("scene_style_cache", None)
-            await repo.save_story(db, story_id, {"outline": outline, "meta": meta})
+            await repo.save_story(
+                db,
+                story_id,
+                {"outline": outline, "meta": dict(story.get("meta") or {})},
+            )
+            await repo.invalidate_story_consistency_cache(db, story_id, scene_style=True)
 
     return data

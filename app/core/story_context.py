@@ -327,8 +327,8 @@ ShotLike = Mapping[str, Any] | Any
 
 
 def _shot_character_names(shot: ShotLike) -> list[str]:
-    for field in ("characters", "character_names", "mentioned_characters", "cast", "participants"):
-        raw = _shot_field(shot, field, None)
+    for field_name in ("characters", "character_names", "mentioned_characters", "cast", "participants"):
+        raw = _shot_field(shot, field_name, None)
         if raw is None:
             continue
         if isinstance(raw, str):
