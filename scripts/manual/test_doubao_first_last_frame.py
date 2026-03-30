@@ -19,10 +19,19 @@ from app.services.image import generate_image
 from app.services.video import generate_video
 
 
-IMAGE_API_KEY = os.getenv("TEST_IMAGE_API_KEY") or os.getenv("SILICONFLOW_API_KEY", "")
-VIDEO_API_KEY = os.getenv("TEST_DOUBAO_VIDEO_API_KEY") or os.getenv("DOUBAO_API_KEY", "")
+IMAGE_API_KEY = (
+    os.getenv("TEST_IMAGE_API_KEY")
+    or os.getenv("SILICONFLOW_IMAGE_API_KEY")
+    or os.getenv("SILICONFLOW_API_KEY", "")
+)
+VIDEO_API_KEY = (
+    os.getenv("TEST_DOUBAO_VIDEO_API_KEY")
+    or os.getenv("DOUBAO_VIDEO_API_KEY")
+    or os.getenv("DOUBAO_API_KEY", "")
+)
 VIDEO_BASE_URL = (
     os.getenv("TEST_DOUBAO_BASE_URL")
+    or os.getenv("DOUBAO_VIDEO_BASE_URL")
     or os.getenv("DOUBAO_BASE_URL")
     or "https://ark.cn-beijing.volces.com/api/v3"
 )
@@ -32,9 +41,9 @@ BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 def _require_manual_env() -> None:
     missing: list[str] = []
     if not IMAGE_API_KEY:
-        missing.append("TEST_IMAGE_API_KEY or SILICONFLOW_API_KEY")
+        missing.append("TEST_IMAGE_API_KEY or SILICONFLOW_IMAGE_API_KEY")
     if not VIDEO_API_KEY:
-        missing.append("TEST_DOUBAO_VIDEO_API_KEY or DOUBAO_API_KEY")
+        missing.append("TEST_DOUBAO_VIDEO_API_KEY or DOUBAO_VIDEO_API_KEY")
     if missing:
         raise RuntimeError(
             "Manual first/last-frame test requires env vars: " + ", ".join(missing)

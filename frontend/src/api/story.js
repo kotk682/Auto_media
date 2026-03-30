@@ -21,6 +21,7 @@ export function getHeaders() {
   if (settings.effectiveScriptProvider) headers['X-Script-Provider'] = settings.effectiveScriptProvider
   if (settings.effectiveScriptApiKey)   headers['X-Script-API-Key']  = settings.effectiveScriptApiKey
   if (settings.effectiveScriptBaseUrl)  headers['X-Script-Base-URL'] = settings.effectiveScriptBaseUrl
+  if (settings.effectiveImageProvider) headers['X-Image-Provider'] = settings.effectiveImageProvider
   if (settings.effectiveImageApiKey)  headers['X-Image-API-Key']  = settings.effectiveImageApiKey
   if (settings.effectiveImageBaseUrl) headers['X-Image-Base-URL'] = settings.effectiveImageBaseUrl
   if (settings.effectiveVideoProvider) headers['X-Video-Provider'] = settings.effectiveVideoProvider

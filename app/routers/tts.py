@@ -67,6 +67,7 @@ async def generate_audio(
                     generated_files=generated_files,
                     pipeline_id=effective_pipeline_id,
                     project_id=project_id,
+                    prune_generated_files_to_shots=True,
                 )
                 if effective_pipeline_id:
                     await persist_generated_files_to_pipeline(
@@ -75,6 +76,7 @@ async def generate_audio(
                         pipeline_id=effective_pipeline_id,
                         story_id=body.story_id,
                         generated_files=generated_files,
+                        prune_generated_files_to_shots=True,
                     )
             except Exception:
                 logger.exception(

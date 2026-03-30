@@ -3,8 +3,9 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import List, Optional
-from app.services.image import generate_images_batch, DEFAULT_MODEL
+from app.services.image import generate_images_batch
 from app.core.api_keys import image_config_dep, get_art_style, inject_art_style, llm_config_dep
+from app.core.model_defaults import resolve_image_model
 from app.core.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.story_context import build_generation_payload
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 class ImageRequest(BaseModel):
     shots: List[dict]
-    model: Optional[str] = DEFAULT_MODEL
+    model: Optional[str] = None
     story_id: Optional[str] = None
     pipeline_id: Optional[str] = None
 
@@ -64,12 +65,18 @@ async def generate_images(
     db: AsyncSession = Depends(get_db),
 ):
     art_style = get_art_style(request)
+    effective_model = resolve_image_model(body.model or "", image_config.get("image_base_url", ""))
     story = None
     story_context = None
     effective_pipeline_id = str(body.pipeline_id or "").strip()
 
     async def _persist_generated_images(generated_files: dict) -> None:
         pipeline_story_id = str(body.story_id or "").strip()
+        invalidated_shot_ids = [
+            str(result.get("shot_id", "")).strip()
+            for result in (generated_files.get("images") or {}).values()
+            if str(result.get("shot_id", "")).strip()
+        ]
 
         if body.story_id and story:
             try:
@@ -82,6 +89,10 @@ async def generate_images(
                     generated_files=generated_files,
                     pipeline_id=effective_pipeline_id,
                     project_id=project_id,
+                    prune_generated_files_to_shots=True,
+                    invalidate_shot_ids=invalidated_shot_ids,
+                    clear_videos_for_invalidated_shots=True,
+                    clear_final_video=True,
                 )
             except Exception:
                 logger.exception(
@@ -106,6 +117,10 @@ async def generate_images(
                     pipeline_id=effective_pipeline_id,
                     story_id=pipeline_story_id,
                     generated_files=generated_files,
+                    prune_generated_files_to_shots=True,
+                    invalidate_shot_ids=invalidated_shot_ids,
+                    clear_videos_for_invalidated_shots=True,
+                    clear_final_video=True,
                 )
             else:
                 logger.warning(
@@ -158,7 +173,7 @@ async def generate_images(
                     effective_pipeline_id = str(generation_state.get("pipeline_id", "")).strip()
                 fallback_results = await generate_images_batch(
                     [_build_basic_payload(shot, art_style) for shot in body.shots],
-                    model=body.model or DEFAULT_MODEL,
+                    model=effective_model,
                     art_style=art_style,
                     **image_config,
                 )
@@ -177,7 +192,7 @@ async def generate_images(
     try:
         results = await generate_images_batch(
             payloads,
-            model=body.model or DEFAULT_MODEL,
+            model=effective_model,
             art_style=art_style,
             **image_config,
         )

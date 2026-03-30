@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.story_assets import get_character_visual_dna
 from app.core.story_context import build_character_reference_anchor
@@ -13,6 +14,7 @@ from app.schemas.story import AnalyzeIdeaRequest, GenerateOutlineRequest, Genera
 from app.services.story_llm import analyze_idea, generate_outline, generate_script, chat, refine, world_building_start, world_building_turn, apply_chat
 from app.services import story_repository as repo
 from app.core.api_keys import get_art_style, image_config_dep, llm_config_dep, resolve_llm_config
+from app.core.model_defaults import resolve_image_model
 from app.services.scene_reference import generate_episode_scene_reference
 from app.services.story_context_service import prepare_story_context
 
@@ -103,6 +105,18 @@ async def api_generate_script(req: GenerateScriptRequest, request: Request, llm:
         script_llm = resolve_llm_config(s_api_key, s_base_url, s_provider, s_model)
     else:
         script_llm = llm
+
+    script_api_key = str(script_llm.get("api_key", "")).strip()
+    story_record = await repo.get_story(db, req.story_id)
+    if not story_record:
+        raise HTTPException(status_code=404, detail="故事不存在")
+    if not script_api_key and not settings.debug:
+        raise HTTPException(
+            status_code=400,
+            detail="剧本生成 需要可用的 LLM API Key，请在前端设置或后端 .env 中完成配置",
+        )
+    if script_api_key and not story_record.get("outline", []):
+        raise HTTPException(status_code=400, detail="剧本生成失败：当前故事缺少大纲，请先完成世界观与大纲生成")
 
     async def event_stream():
         scenes = []
@@ -269,6 +283,7 @@ async def generate_scene_reference(
         raise HTTPException(status_code=404, detail="剧本不存在")
 
     art_style = get_art_style(request)
+    effective_model = resolve_image_model(body.model or "", image_config.get("image_base_url", ""))
     existing_episode_assets = dict((story.get("meta") or {}).get("episode_reference_assets") or {})
     episode_prefix = f"ep{body.episode:02d}_"
     existing_groups = []
@@ -288,7 +303,7 @@ async def generate_scene_reference(
             story,
             story_context,
             episode=body.episode,
-            model=body.model or "",
+            model=effective_model,
             art_style=art_style,
             existing_assets=[group["asset"] for group in existing_groups],
             **image_config,

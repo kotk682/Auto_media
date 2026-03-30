@@ -171,25 +171,26 @@ Query:
 
 ---
 
-### 4. FFmpeg 合成
+### 4. 视频拼接
 
-### `POST /api/v1/pipeline/{project_id}/stitch`
+### `POST /api/v1/pipeline/{project_id}/concat`
 
-手动触发音视频合成（仅分离式策略需要）
+按当前时间线拼接完整视频
 
 #### 请求参数
 
 ```json
 {
-  "shots": [
-    {
-      "shot_id": "scene1_shot1",
-      "video_url": "/media/videos/scene1_shot1.mp4",
-      "audio_url": "/media/audio/scene1_shot1.mp3"
-    }
+  "video_urls": [
+    "/media/videos/scene1_shot1.mp4"
   ]
 }
 ```
+
+补充说明：
+
+- 当提供 `pipeline_id` 时，后端会按当前 storyboard 自行推导导出顺序。
+- 只有当前主镜头视频与相邻 transition 全部齐全时，才允许导出完整视频。
 
 ---
 
@@ -359,8 +360,8 @@ ls -lh media/videos/
 
 1. **API Key 配置**：确保 `.env` 文件中配置了必要的 API Key
    - LLM: ANTHROPIC_API_KEY / OPENAI_API_KEY / etc.
-   - 图片: SILICONFLOW_API_KEY
-   - 视频: QWEN_API_KEY
+   - 图片: SILICONFLOW_IMAGE_API_KEY
+   - 视频: DASHSCOPE_VIDEO_API_KEY
 
 2. **FFmpeg 安装**：分离式策略需要 FFmpeg
    ```bash

@@ -149,7 +149,7 @@ CREATE INDEX idx_pipelines_created_at ON pipelines(created_at);
 - 前端瞬时字段 `ttsLoading / imageLoading / videoLoading`
 - 旧的 `last_frame_prompt / last_frame_url`
 
-这意味着 `story.meta.storyboard_generation` 现在既是“手动分镜页恢复态”，也是“按镜头汇总生成结果”的轻量真相源。
+这意味着 `story.meta.storyboard_generation` 现在是“手动分镜页恢复态 + 运行资产镜像层”，但不是替代 `pipeline.generated_files` 的运行期主真相源。
 
 ---
 
@@ -313,6 +313,11 @@ resolve_tracking_story_id(project_id, story_id)
 
 - `pipelines.generated_files` 是运行期状态真相源
 - `meta.storyboard_generation` 是恢复态与镜头级结果镜像
+
+补充说明：
+
+- 所有运行资产在使用前都应按当前 storyboard 边界裁剪，避免旧 `shot_id / transition_id` 串入。
+- 当镜头图片或视频被重新生成时，相关 `transition` 与 `final_video_url` 会被失效，避免继续导出旧结果。
 
 ---
 

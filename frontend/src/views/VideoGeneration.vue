@@ -271,23 +271,26 @@
         <div class="storyboard-header">
           <h2>{{ shots.length }} 个分镜 · 共 {{ totalDuration }} 秒</h2>
           <div class="action-group">
-            <select v-model="selectedVoice" class="voice-select">
+            <select v-if="speechGenerationEnabled" v-model="selectedVoice" class="voice-select">
               <option v-for="voice in voices" :key="voice.id" :value="voice.id">
                 {{ voice.name }}
               </option>
             </select>
-            <button class="action-btn" @click="generateAllTTS">全部生成语音</button>
+            <button v-if="speechGenerationEnabled" class="action-btn" @click="generateAllTTS">全部生成语音</button>
             <button class="action-btn" @click="generateAllImages">全部生成图片</button>
             <button class="action-btn" @click="generateAllVideos">全部生成视频</button>
             <button
-              v-if="hasAnyVideo"
+              v-if="shots.length > 0"
               class="action-btn concat-btn"
-              :disabled="concatLoading"
+              :disabled="concatLoading || !exportReadiness.ready"
               @click="concatAllVideos"
             >
               {{ concatLoading ? '拼接中...' : '导出完整视频' }}
             </button>
           </div>
+        </div>
+        <div v-if="shots.length > 0 && !exportReadiness.ready" class="export-readiness-note">
+          {{ exportReadiness.message }}
         </div>
         <div class="transition-note">
           过渡视频现已接入后端。双帧只用于 transition，本页会从相邻两个主镜头视频中抽取对应帧，不影响普通主镜头生成链路。
@@ -319,7 +322,7 @@
                 <p class="en">{{ item.shot.final_video_prompt || item.shot.visual_prompt }}</p>
               </div>
 
-              <div v-if="hasSpeechAudio(item.shot)" class="tts-bar">
+              <div v-if="speechGenerationEnabled && hasSpeechAudio(item.shot)" class="tts-bar">
                 <button class="tts-btn" @click="generateOneTTS(item.shot.shot_id)" :disabled="item.shot.ttsLoading">
                   {{ item.shot.ttsLoading ? '生成中...' : '生成语音' }}
                 </button>
@@ -434,6 +437,7 @@ import { useStoryStore } from '../stores/story.js'
 import { generateEpisodeSceneReference, generatePipelineTransition, getHeaders, getPipelineStatus } from '../api/story.js'
 import StepIndicator from '../components/StepIndicator.vue'
 import ApiKeyModal from '../components/ApiKeyModal.vue'
+import { resolveBackendBaseUrl, resolveBackendMediaUrl } from '../utils/backend.js'
 
 const router = useRouter()
 const settings = useSettingsStore()
@@ -456,6 +460,7 @@ const isGenerating = ref(false)
 const error = ref('')
 const transitionMessage = ref('')
 const shots = computed(() => storyStore.shots)
+const speechGenerationEnabled = false
 const voices = ref([])
 const selectedVoice = ref('')
 const showKeyModal = ref(false)
@@ -484,7 +489,6 @@ const manualStoryId = ref(storyStore.manualStoryId || storyStore.storyId || '')
 const transitionLoadingMap = ref({})
 const episodeReferenceErrors = ref({})
 
-const hasAnyVideo = computed(() => shots.value.some(s => s.video_url))
 const transitionResults = computed(() => {
   const generatedFiles = storyStore.meta?.storyboard_generation?.generated_files
   return generatedFiles?.transitions && typeof generatedFiles.transitions === 'object'
@@ -500,8 +504,72 @@ function buildTransitionId(fromShotId, toShotId) {
   return `transition_${fromShotId}__${toShotId}`
 }
 
+function buildLocalTimeline(shotsList = [], transitionsMap = {}) {
+  const timeline = []
+  const safeTransitions = transitionsMap && typeof transitionsMap === 'object' ? transitionsMap : {}
+
+  for (let i = 0; i < shotsList.length; i += 1) {
+    const shotId = shotsList[i]?.shot_id
+    if (!shotId) continue
+
+    timeline.push({ item_type: 'shot', item_id: shotId })
+
+    if (i + 1 >= shotsList.length) continue
+
+    const nextShotId = shotsList[i + 1]?.shot_id
+    if (!nextShotId) continue
+
+    const transitionId = buildTransitionId(shotId, nextShotId)
+    if (safeTransitions[transitionId]?.video_url) {
+      timeline.push({ item_type: 'transition', item_id: transitionId })
+    }
+  }
+
+  return timeline
+}
+
 function effectivePipelineId() {
   return manualPipelineId.value || storyStore.meta?.storyboard_generation?.pipeline_id || ''
+}
+
+function invalidateLocalTransitionArtifacts(shotId, { clearShotVideo = false } = {}) {
+  if (!shotId) return
+
+  const currentGeneratedFiles = storyStore.meta?.storyboard_generation?.generated_files
+  const nextGeneratedFiles = currentGeneratedFiles && typeof currentGeneratedFiles === 'object'
+    ? { ...currentGeneratedFiles }
+    : {}
+
+  const nextTransitions = nextGeneratedFiles.transitions && typeof nextGeneratedFiles.transitions === 'object'
+    ? { ...nextGeneratedFiles.transitions }
+    : {}
+
+  Object.keys(nextTransitions).forEach(transitionId => {
+    if (transitionId.includes(`_${shotId}__`) || transitionId.endsWith(`__${shotId}`)) {
+      delete nextTransitions[transitionId]
+    }
+  })
+
+  nextGeneratedFiles.transitions = nextTransitions
+
+  if (clearShotVideo) {
+    const nextVideos = nextGeneratedFiles.videos && typeof nextGeneratedFiles.videos === 'object'
+      ? { ...nextGeneratedFiles.videos }
+      : {}
+    delete nextVideos[shotId]
+    nextGeneratedFiles.videos = nextVideos
+  }
+
+  nextGeneratedFiles.final_video_url = ''
+  nextGeneratedFiles.timeline = buildLocalTimeline(shots.value, nextTransitions)
+
+  storyStore.syncStoryboardGenerationMeta({
+    generatedFiles: nextGeneratedFiles,
+    replaceGeneratedFiles: true,
+  })
+  storyStore.syncStoryboardGenerationMeta({ shots: shots.value })
+  concatVideoUrl.value = ''
+  storyStore.setStoryboardFinalVideoUrl('')
 }
 
 const storyboardFlowItems = computed(() => {
@@ -531,6 +599,54 @@ const storyboardFlowItems = computed(() => {
     })
   }
   return items
+})
+
+const exportReadiness = computed(() => {
+  if (shots.value.length === 0) {
+    return {
+      ready: false,
+      missingShotVideos: [],
+      missingTransitions: [],
+      message: '当前还没有可导出的分镜。',
+    }
+  }
+
+  const missingShotVideos = shots.value
+    .filter(shot => !shot?.video_url)
+    .map(shot => shot.shot_id)
+
+  const missingTransitions = []
+  for (let i = 0; i < shots.value.length - 1; i += 1) {
+    const transitionId = buildTransitionId(shots.value[i].shot_id, shots.value[i + 1].shot_id)
+    if (!transitionResults.value[transitionId]?.video_url) {
+      missingTransitions.push(transitionId)
+    }
+  }
+
+  const ready = missingShotVideos.length === 0 && missingTransitions.length === 0
+  if (ready) {
+    return {
+      ready: true,
+      missingShotVideos,
+      missingTransitions,
+      message: '',
+    }
+  }
+
+  const parts = []
+  if (missingShotVideos.length > 0) {
+    parts.push(`缺少主镜头视频：${missingShotVideos.join('、')}`)
+  }
+  if (missingTransitions.length > 0) {
+    parts.push(`缺少过渡视频：${missingTransitions.join('、')}`)
+  }
+
+  return {
+    ready: false,
+    missingShotVideos,
+    missingTransitions,
+    message: `导出完整视频前，当前核心分镜和相邻过渡分镜必须全部生成完成。${parts.join('；')}`,
+  }
 })
 
 // 生成唯一 ID
@@ -592,6 +708,28 @@ function updateShotsFromGeneratedFiles(generatedFiles = {}, { replaceStoryboard 
     updater(shot)
   }
 
+  if (replaceStoryboard) {
+    const hasTts = Object.prototype.hasOwnProperty.call(generatedFiles, 'tts')
+    const hasImages = Object.prototype.hasOwnProperty.call(generatedFiles, 'images')
+    const hasVideos = Object.prototype.hasOwnProperty.call(generatedFiles, 'videos')
+    const ttsMap = hasTts && generatedFiles.tts && typeof generatedFiles.tts === 'object' ? generatedFiles.tts : {}
+    const imageMap = hasImages && generatedFiles.images && typeof generatedFiles.images === 'object' ? generatedFiles.images : {}
+    const videoMap = hasVideos && generatedFiles.videos && typeof generatedFiles.videos === 'object' ? generatedFiles.videos : {}
+
+    shots.value.forEach(shot => {
+      if (hasTts && !ttsMap[shot.shot_id]) {
+        delete shot.audio_url
+        delete shot.audio_duration
+      }
+      if (hasImages && !imageMap[shot.shot_id]) {
+        delete shot.image_url
+      }
+      if (hasVideos && !videoMap[shot.shot_id]) {
+        delete shot.video_url
+      }
+    })
+  }
+
   Object.values(generatedFiles.tts || {}).forEach(result => {
     updateShot(result.shot_id, shot => {
       shot.audio_url = result.audio_url
@@ -611,6 +749,11 @@ function updateShotsFromGeneratedFiles(generatedFiles = {}, { replaceStoryboard 
     })
   })
 
+  if (replaceStoryboard && !generatedFiles.final_video_url) {
+    concatVideoUrl.value = ''
+    storyStore.setStoryboardFinalVideoUrl('')
+  }
+
   if (generatedFiles.final_video_url) {
     concatVideoUrl.value = generatedFiles.final_video_url
     storyStore.setStoryboardFinalVideoUrl(generatedFiles.final_video_url)
@@ -624,7 +767,7 @@ function updateShotsFromGeneratedFiles(generatedFiles = {}, { replaceStoryboard 
     shots: shots.value,
     finalVideoUrl: concatVideoUrl.value,
     projectId: manualProjectId.value || storyStore.storyId || '',
-    pipelineId: manualPipelineId.value || '',
+    pipelineId: effectivePipelineId(),
     storyId: manualStoryId.value || storyStore.storyId || '',
   })
 }
@@ -670,26 +813,29 @@ async function pollManualPipeline({ projectId, pipelineId, storyId, isDone, time
 async function restoreLatestPipelineState() {
   const projectId = manualProjectId.value || storyStore.storyId || ''
   const storyId = manualStoryId.value || storyStore.storyId || projectId
+  const pipelineId = effectivePipelineId()
   if (!projectId) {
     if (storyId) {
       console.warn('Skip restoring pipeline state because projectId is missing', { storyId })
     }
-    return
+    return null
   }
 
   try {
     const state = await getPipelineStatus(projectId, {
-      pipelineId: manualPipelineId.value,
+      pipelineId,
       storyId,
     })
     rememberManualPipelineContext({
       projectId: projectId || state.project_id || state.story_id || '',
-      pipelineId: state.pipeline_id || manualPipelineId.value,
+      pipelineId: state.pipeline_id || pipelineId,
       storyId: state.story_id || storyId,
     })
     updateShotsFromGeneratedFiles(state.generated_files, { replaceStoryboard: true })
+    return state
   } catch (err) {
     console.warn('Failed to restore latest pipeline state:', err)
+    return null
   }
 }
 
@@ -960,13 +1106,25 @@ function isAuthError(msg) {
   return /401|403|invalid|incorrect|unauthorized|api.?key/i.test(msg)
 }
 
+function createApiError(status, detail, fallbackMessage = '请求失败') {
+  const error = new Error(detail || fallbackMessage)
+  error.status = status
+  return error
+}
+
+async function readApiError(response, fallbackMessage = '请求失败') {
+  let detail = ''
+  try {
+    const errData = await response.json()
+    detail = errData?.detail || ''
+  } catch {
+    detail = ''
+  }
+  return createApiError(response.status, detail || `${fallbackMessage} (${response.status})`)
+}
+
 // 解析分镜
 async function parseStoryboard() {
-  if (!settings.useMock && !settings.effectiveLlmApiKey) {
-    showKeyModal.value = true
-    return
-  }
-
   const script = getScript()
 
   if (!script) {
@@ -1087,8 +1245,7 @@ async function parseStoryboard() {
     })
 
     if (!res.ok) {
-      const errData = await res.json()
-      throw new Error(errData.detail || '请求失败')
+      throw await readApiError(res, '请求失败')
     }
 
     progress.value = { show: true, label: '解析完成，渲染卡片...', percent: 90 }
@@ -1116,7 +1273,11 @@ async function parseStoryboard() {
     if (err.name === 'AbortError') return
     if (!isMounted.value) return
     const msg = err.message || '请求失败'
-    if (isAuthError(msg)) {
+    if (err.status === 400) {
+      keyModalType.value = 'missing'
+      keyModalMsg.value = '缺少 API Key，请先在设置页填写可用的密钥。'
+      showKeyModal.value = true
+    } else if (isAuthError(msg)) {
       keyModalType.value = 'invalid'
       keyModalMsg.value = 'API Key 无效或已过期，请检查后重新设置。'
       showKeyModal.value = true
@@ -1130,19 +1291,11 @@ async function parseStoryboard() {
 }
 
 function getBackendUrl() {
-  const configured = settings.backendUrl?.replace(/\/$/, '')
-  if (configured) return configured
-  if (import.meta.env.DEV) return 'http://localhost:8000'
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin.replace(/\/$/, '')
-  }
-  return ''
+  return resolveBackendBaseUrl(settings.backendUrl)
 }
 
 function getMediaUrl(path) {
-  if (!path) return ''
-  if (path.startsWith('http') || path.startsWith('data:')) return path
-  return `${getBackendUrl()}${path}`
+  return resolveBackendMediaUrl(path, settings.backendUrl)
 }
 
 // TTS/Image/Video 生成函数
@@ -1288,8 +1441,9 @@ async function generateAllTTS() {
   try {
     const projectId = resolveManualProjectId()
     const fallbackStoryId = manualStoryId.value || storyStore.storyId || projectId
+    const pipelineId = effectivePipelineId()
     const query = buildPipelineQuery({
-      pipeline_id: manualPipelineId.value,
+      pipeline_id: pipelineId,
       story_id: fallbackStoryId,
       voice: selectedVoice.value,
       generate_tts: true,
@@ -1301,7 +1455,7 @@ async function generateAllTTS() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getHeaders() },
       body: JSON.stringify({
-        pipeline_id: manualPipelineId.value || undefined,
+        pipeline_id: pipelineId || undefined,
         story_id: fallbackStoryId,
         shots: shots.value,
       })
@@ -1315,14 +1469,14 @@ async function generateAllTTS() {
     const data = await res.json()
     rememberManualPipelineContext({
       projectId,
-      pipelineId: data.pipeline_id || manualPipelineId.value,
+      pipelineId: data.pipeline_id || pipelineId,
       storyId: data.story_id || fallbackStoryId,
     })
     updateShotsFromGeneratedFiles(data.state?.generated_files, { replaceStoryboard: true })
 
     await pollManualPipeline({
       projectId,
-      pipelineId: data.pipeline_id || manualPipelineId.value,
+      pipelineId: data.pipeline_id || pipelineId,
       storyId: data.story_id || fallbackStoryId,
       isDone: state => state.progress >= 60 && state.generated_files?.tts,
     })
@@ -1367,7 +1521,27 @@ async function generateOneImage(shotId) {
     const results = await res.json()
     const r = results[0]
     shot.image_url = r.image_url
-    storyStore.syncStoryboardGenerationMeta({ shots: shots.value })
+    if (effectivePipelineId()) {
+      try {
+        const state = await getPipelineStatus(projectId, {
+          pipelineId: effectivePipelineId(),
+          storyId: effectiveStoryId(),
+        })
+        rememberManualPipelineContext({
+          projectId,
+          pipelineId: state.pipeline_id || effectivePipelineId(),
+          storyId: state.story_id || effectiveStoryId(),
+        })
+        updateShotsFromGeneratedFiles(state.generated_files, { replaceStoryboard: true })
+      } catch (syncErr) {
+        console.warn('Failed to refresh pipeline state after image generation:', syncErr)
+        delete shot.video_url
+        invalidateLocalTransitionArtifacts(shotId, { clearShotVideo: true })
+      }
+    } else {
+      delete shot.video_url
+      invalidateLocalTransitionArtifacts(shotId, { clearShotVideo: true })
+    }
   } catch (err) {
     if (!isMounted.value) return
     console.error('Image generation failed:', err)
@@ -1395,8 +1569,9 @@ async function generateAllImages() {
   try {
     const projectId = resolveManualProjectId()
     const fallbackStoryId = manualStoryId.value || storyStore.storyId || projectId
+    const pipelineId = effectivePipelineId()
     const query = buildPipelineQuery({
-      pipeline_id: manualPipelineId.value,
+      pipeline_id: pipelineId,
       story_id: fallbackStoryId,
       generate_tts: false,
       generate_images: true,
@@ -1407,7 +1582,7 @@ async function generateAllImages() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getHeaders() },
       body: JSON.stringify({
-        pipeline_id: manualPipelineId.value || undefined,
+        pipeline_id: pipelineId || undefined,
         story_id: fallbackStoryId,
         shots: shots.value,
       })
@@ -1421,14 +1596,14 @@ async function generateAllImages() {
     const data = await res.json()
     rememberManualPipelineContext({
       projectId,
-      pipelineId: data.pipeline_id || manualPipelineId.value,
+      pipelineId: data.pipeline_id || pipelineId,
       storyId: data.story_id || fallbackStoryId,
     })
     updateShotsFromGeneratedFiles(data.state?.generated_files, { replaceStoryboard: true })
 
     await pollManualPipeline({
       projectId,
-      pipelineId: data.pipeline_id || manualPipelineId.value,
+      pipelineId: data.pipeline_id || pipelineId,
       storyId: data.story_id || fallbackStoryId,
       isDone: state => state.progress >= 60 && state.generated_files?.images,
     })
@@ -1473,7 +1648,25 @@ async function generateOneVideo(shotId) {
     const results = await res.json()
     const r = results[0]
     shot.video_url = r.video_url
-    storyStore.syncStoryboardGenerationMeta({ shots: shots.value })
+    if (effectivePipelineId()) {
+      try {
+        const state = await getPipelineStatus(projectId, {
+          pipelineId: effectivePipelineId(),
+          storyId: effectiveStoryId(),
+        })
+        rememberManualPipelineContext({
+          projectId,
+          pipelineId: state.pipeline_id || effectivePipelineId(),
+          storyId: state.story_id || effectiveStoryId(),
+        })
+        updateShotsFromGeneratedFiles(state.generated_files, { replaceStoryboard: true })
+      } catch (syncErr) {
+        console.warn('Failed to refresh pipeline state after video generation:', syncErr)
+        invalidateLocalTransitionArtifacts(shotId)
+      }
+    } else {
+      invalidateLocalTransitionArtifacts(shotId)
+    }
   } catch (err) {
     if (!isMounted.value) return
     console.error('Video generation failed:', err)
@@ -1502,8 +1695,9 @@ async function generateAllVideos() {
   try {
     const projectId = resolveManualProjectId()
     const fallbackStoryId = manualStoryId.value || storyStore.storyId || projectId
+    const pipelineId = effectivePipelineId()
     const query = buildPipelineQuery({
-      pipeline_id: manualPipelineId.value,
+      pipeline_id: pipelineId,
       story_id: fallbackStoryId,
       base_url: getBackendUrl(),
       video_model: settings.effectiveVideoModel || undefined,
@@ -1523,14 +1717,14 @@ async function generateAllVideos() {
     const data = await res.json()
     rememberManualPipelineContext({
       projectId,
-      pipelineId: data.pipeline_id || manualPipelineId.value,
+      pipelineId: data.pipeline_id || pipelineId,
       storyId: data.story_id || fallbackStoryId,
     })
     updateShotsFromGeneratedFiles(data.state?.generated_files, { replaceStoryboard: true })
 
     await pollManualPipeline({
       projectId,
-      pipelineId: data.pipeline_id || manualPipelineId.value,
+      pipelineId: data.pipeline_id || pipelineId,
       storyId: data.story_id || fallbackStoryId,
       isDone: state => state.progress >= 85 && state.generated_files?.videos,
     })
@@ -1552,6 +1746,35 @@ async function generateAllVideos() {
 }
 
 async function concatAllVideos() {
+  const projectId = resolveManualProjectId()
+  const fallbackStoryId = manualStoryId.value || storyStore.storyId || projectId
+  const pipelineId = effectivePipelineId()
+
+  error.value = ''
+  transitionMessage.value = ''
+
+  if (pipelineId) {
+    try {
+      const latestState = await getPipelineStatus(projectId, {
+        pipelineId,
+        storyId: fallbackStoryId,
+      })
+      rememberManualPipelineContext({
+        projectId,
+        pipelineId: latestState.pipeline_id || pipelineId,
+        storyId: latestState.story_id || fallbackStoryId,
+      })
+      updateShotsFromGeneratedFiles(latestState.generated_files, { replaceStoryboard: true })
+    } catch (syncErr) {
+      console.warn('Failed to refresh pipeline state before concat:', syncErr)
+    }
+  }
+
+  if (!exportReadiness.value.ready) {
+    error.value = exportReadiness.value.message
+    return
+  }
+
   const shotMap = Object.fromEntries(shots.value.filter(s => s?.shot_id).map(s => [s.shot_id, s]))
   const orderedVideoUrls = []
 
@@ -1583,14 +1806,10 @@ async function concatAllVideos() {
 
   concatLoading.value = true
   concatVideoUrl.value = ''
-  error.value = ''
-  transitionMessage.value = ''
 
   try {
-    const projectId = resolveManualProjectId()
-    const fallbackStoryId = manualStoryId.value || storyStore.storyId || projectId
     const query = buildPipelineQuery({
-      pipeline_id: manualPipelineId.value,
+      pipeline_id: pipelineId,
       story_id: fallbackStoryId,
     })
 
@@ -1608,7 +1827,7 @@ async function concatAllVideos() {
     const data = await res.json()
     rememberManualPipelineContext({
       projectId,
-      pipelineId: data.pipeline_id || manualPipelineId.value,
+      pipelineId: data.pipeline_id || pipelineId,
       storyId: data.story_id || fallbackStoryId,
     })
     concatVideoUrl.value = data.video_url
@@ -1622,7 +1841,9 @@ async function concatAllVideos() {
 }
 
 onMounted(async () => {
-  loadVoices()
+  if (speechGenerationEnabled) {
+    loadVoices()
+  }
   storyStore.ensureSceneReferenceAssets()
   concatVideoUrl.value = storyStore.storyboardFinalVideoUrl || storyStore.meta?.storyboard_generation?.final_video_url || ''
   rememberManualPipelineContext({
@@ -1642,7 +1863,7 @@ onMounted(async () => {
     shots: storyStore.shots,
     finalVideoUrl: concatVideoUrl.value,
     projectId: manualProjectId.value || storyStore.storyId || '',
-    pipelineId: manualPipelineId.value || '',
+    pipelineId: effectivePipelineId(),
     storyId: manualStoryId.value || storyStore.storyId || '',
   })
 
@@ -2493,6 +2714,17 @@ button:disabled {
   font-size: 16px;
   font-weight: 600;
   color: #1a1a1a;
+}
+
+.export-readiness-note {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #f0d7a1;
+  background: #fff8e8;
+  color: #8a5b00;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .action-group {

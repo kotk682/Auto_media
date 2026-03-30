@@ -6,10 +6,10 @@ from pathlib import Path
 import edge_tts
 
 import re
+from app.paths import AUDIO_DIR
 from app.services.ffmpeg import resolve_media_binary
 
 # Output directory for audio files
-AUDIO_DIR = Path("media/audio")
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 # Good Chinese voices

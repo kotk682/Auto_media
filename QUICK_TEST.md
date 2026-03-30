@@ -18,10 +18,10 @@ DEFAULT_LLM_PROVIDER=claude
 ANTHROPIC_API_KEY=sk-ant-...
 
 # 图片生成
-SILICONFLOW_API_KEY=sk-...
+SILICONFLOW_IMAGE_API_KEY=sk-...
 
 # 视频生成（阿里云通义万象）
-QWEN_API_KEY=sk-...
+DASHSCOPE_VIDEO_API_KEY=sk-...
 ```
 
 ### 2. 启动服务
@@ -259,7 +259,7 @@ curl https://api.anthropic.com/v1/messages \
 
 ### 2. 图片/视频生成失败
 
-- 检查 SILICONFLOW_API_KEY 和 QWEN_API_KEY
+- 检查 SILICONFLOW_IMAGE_API_KEY 和 DASHSCOPE_VIDEO_API_KEY
 - 检查账户余额
 - 查看后端日志：`python start.py` 输出
 

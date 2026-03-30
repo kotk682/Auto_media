@@ -14,17 +14,21 @@ from urllib.parse import urlparse
 from fastapi import HTTPException
 
 from app.core.config import settings
-from app.core.api_keys import mask_key, inject_art_style
+from app.core.api_keys import (
+    get_default_image_provider,
+    get_image_provider_api_key,
+    get_image_provider_base_url,
+    infer_image_provider,
+    inject_art_style,
+    mask_key,
+)
+from app.paths import CHARACTER_DIR, EPISODE_DIR, IMAGE_DIR, MEDIA_DIR
 from app.prompts.character import build_character_prompt
 
-MEDIA_DIR = Path("media")
-IMAGE_DIR = Path("media/images")
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-CHARACTER_DIR = Path("media/characters")
 CHARACTER_DIR.mkdir(parents=True, exist_ok=True)
 
-EPISODE_DIR = Path("media/episodes")
 EPISODE_DIR.mkdir(parents=True, exist_ok=True)
 
 logger = logging.getLogger(__name__)
@@ -53,7 +57,17 @@ ARK_CHARACTER_SIZE = "1920x1920"
 
 
 def _is_ark(base_url: str) -> bool:
-    return "volces.com" in base_url or "volcengine" in base_url
+    normalized = (base_url or "").rstrip("/").lower()
+    configured_doubao_urls = {
+        (settings.doubao_image_base_url or "").rstrip("/").lower(),
+        (settings.doubao_video_base_url or "").rstrip("/").lower(),
+        (settings.doubao_base_url or "").rstrip("/").lower(),
+    }
+    return (
+        normalized in {url for url in configured_doubao_urls if url}
+        or "volces.com" in normalized
+        or "volcengine" in normalized
+    )
 
 
 def _versioned_media_name(stem: str, suffix: str) -> str:
@@ -146,8 +160,8 @@ def _data_url_from_bytes(content: bytes, name: str = "", content_type: str = "")
 def _resolve_allowed_media_path(path_like: str | Path) -> Path | None:
     try:
         candidate = Path(path_like).expanduser()
-        resolved = candidate.resolve() if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
-        media_root = MEDIA_DIR.resolve()
+        resolved = candidate.resolve() if candidate.is_absolute() else (MEDIA_DIR.parent / candidate).resolve()
+        media_root = MEDIA_DIR.resolve(strict=False)
         if resolved.is_file() and resolved.is_relative_to(media_root):
             return resolved
     except (OSError, RuntimeError, ValueError):
@@ -276,6 +290,7 @@ async def generate_image(
     model: str = DEFAULT_MODEL,
     image_api_key: str = "",
     image_base_url: str = "",
+    image_provider: str = "",
     negative_prompt: str = "",
     reference_images: Optional[list[Any]] = None,
     output_dir: Optional[Path] = None,
@@ -283,10 +298,20 @@ async def generate_image(
     timeout_seconds: float = 60,
 ) -> dict:
     """Generate image for a single shot. Returns { shot_id, image_path, image_url }."""
-    base_url = image_base_url or settings.siliconflow_base_url
-    if image_base_url and not image_api_key:
+    resolved_image_provider = (
+        str(image_provider or "").strip().lower()
+        or infer_image_provider(image_base_url)
+        or get_default_image_provider()
+    )
+    base_url = image_base_url or get_image_provider_base_url(resolved_image_provider)
+    if image_base_url and resolved_image_provider == "custom" and not image_api_key:
         raise HTTPException(status_code=400, detail="提供自定义 image_base_url 时必须同时提供 image_api_key")
-    image_api_key = image_api_key or settings.siliconflow_api_key
+    image_api_key = image_api_key or get_image_provider_api_key(resolved_image_provider)
+    if not image_api_key:
+        raise HTTPException(
+            status_code=400,
+            detail=f"图片生成 API Key 未配置 (provider={resolved_image_provider or get_default_image_provider()})",
+        )
     size = ARK_IMAGE_SIZE if _is_ark(base_url) else IMAGE_SIZE
     async with httpx.AsyncClient(timeout=timeout_seconds) as client:
         payload = {"model": model, "prompt": visual_prompt, "n": 1, "size": size, "response_format": "url"}
@@ -415,7 +440,14 @@ async def generate_image(
     }
 
 
-async def generate_images_batch(shots: list[dict], model: str = DEFAULT_MODEL, image_api_key: str = "", image_base_url: str = "", art_style: str = "") -> list[dict]:
+async def generate_images_batch(
+    shots: list[dict],
+    model: str = DEFAULT_MODEL,
+    image_api_key: str = "",
+    image_base_url: str = "",
+    image_provider: str = "",
+    art_style: str = "",
+) -> list[dict]:
     """Generate images for all shots concurrently.
 
     Phase 4:
@@ -435,6 +467,7 @@ async def generate_images_batch(shots: list[dict], model: str = DEFAULT_MODEL, i
             model,
             image_api_key,
             image_base_url,
+            image_provider,
             shot.get("negative_prompt", ""),
             shot.get("reference_images"),
         )
@@ -463,14 +496,25 @@ async def generate_character_image(
     model: str = DEFAULT_MODEL,
     image_api_key: str = "",
     image_base_url: str = "",
+    image_provider: str = "",
     art_style: str = "",
 ) -> dict:
     """Generate a standard three-view character sheet. Returns { character_name, image_path, image_url, prompt }."""
     prompt = build_character_prompt(character_name, role, description, art_style=art_style)
-    base_url = image_base_url or settings.siliconflow_base_url
-    if image_base_url and not image_api_key:
+    resolved_image_provider = (
+        str(image_provider or "").strip().lower()
+        or infer_image_provider(image_base_url)
+        or get_default_image_provider()
+    )
+    base_url = image_base_url or get_image_provider_base_url(resolved_image_provider)
+    if image_base_url and resolved_image_provider == "custom" and not image_api_key:
         raise HTTPException(status_code=400, detail="提供自定义 image_base_url 时必须同时提供 image_api_key")
-    image_api_key = image_api_key or settings.siliconflow_api_key
+    image_api_key = image_api_key or get_image_provider_api_key(resolved_image_provider)
+    if not image_api_key:
+        raise HTTPException(
+            status_code=400,
+            detail=f"图片生成 API Key 未配置 (provider={resolved_image_provider or get_default_image_provider()})",
+        )
     size = ARK_CHARACTER_SIZE if _is_ark(base_url) else CHARACTER_SIZE
 
     async with httpx.AsyncClient(timeout=120) as client:
@@ -559,6 +603,7 @@ async def generate_character_images_batch(
     model: str = DEFAULT_MODEL,
     image_api_key: str = "",
     image_base_url: str = "",
+    image_provider: str = "",
     art_style: str = "",
 ) -> list[dict]:
     """Generate character design images for all characters concurrently."""
@@ -571,6 +616,7 @@ async def generate_character_images_batch(
             model=model,
             image_api_key=image_api_key,
             image_base_url=image_base_url,
+            image_provider=image_provider,
             art_style=art_style,
         )
         for char in characters

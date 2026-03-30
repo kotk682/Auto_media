@@ -6,8 +6,9 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.api_keys import image_config_dep, get_art_style
+from app.core.model_defaults import resolve_image_model
 from app.core.story_assets import build_character_asset_record, get_character_asset_entry
-from app.services.image import generate_character_image, generate_character_images_batch, DEFAULT_MODEL
+from app.services.image import generate_character_image, generate_character_images_batch
 from app.services import story_repository as repo
 
 router = APIRouter(prefix="/api/v1/character", tags=["character"])
@@ -20,13 +21,13 @@ class CharacterImageRequest(BaseModel):
     character_name: str
     role: str
     description: str
-    model: Optional[str] = DEFAULT_MODEL
+    model: Optional[str] = None
 
 
 class BatchCharacterRequest(BaseModel):
     story_id: str
     characters: List[dict]
-    model: Optional[str] = DEFAULT_MODEL
+    model: Optional[str] = None
 
 
 class CharacterImageResult(BaseModel):
@@ -52,13 +53,14 @@ async def generate_single(body: CharacterImageRequest, request: Request, image_c
     if not (body.character_id or "").strip():
         raise HTTPException(status_code=400, detail="character_id 是必填项，禁止按角色名复用或覆盖人设图")
     art_style = get_art_style(request)
+    effective_model = resolve_image_model(body.model or "", image_config.get("image_base_url", ""))
     try:
         result = await generate_character_image(
             character_name=body.character_name,
             role=body.role,
             description=body.description,
             story_id=body.story_id,
-            model=body.model or DEFAULT_MODEL,
+            model=effective_model,
             art_style=art_style,
             **image_config,
         )
@@ -103,11 +105,12 @@ async def generate_all(body: BatchCharacterRequest, request: Request, image_conf
             detail=f"以下角色缺少 character_id，已阻止按角色名复用或覆盖人设图: {'、'.join(missing_id_names)}",
         )
     art_style = get_art_style(request)
+    effective_model = resolve_image_model(body.model or "", image_config.get("image_base_url", ""))
     try:
         raw_results = await generate_character_images_batch(
             characters=body.characters,
             story_id=body.story_id,
-            model=body.model or DEFAULT_MODEL,
+            model=effective_model,
             art_style=art_style,
             **image_config,
         )

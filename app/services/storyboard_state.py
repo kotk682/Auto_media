@@ -60,6 +60,198 @@ def _merge_generated_files(
     return merged
 
 
+def collect_storyboard_shot_ids(shots: list[Any] | None) -> list[str]:
+    ordered_ids: list[str] = []
+    seen: set[str] = set()
+    for shot in shots or []:
+        if not isinstance(shot, Mapping):
+            shot = serialize_shot_for_storage(shot)
+        shot_id = str(shot.get("shot_id", "")).strip()
+        if not shot_id or shot_id in seen:
+            continue
+        ordered_ids.append(shot_id)
+        seen.add(shot_id)
+    return ordered_ids
+
+
+def collect_expected_transition_ids(shots: list[Any] | None) -> list[str]:
+    shot_ids = collect_storyboard_shot_ids(shots)
+    return [
+        f"transition_{shot_ids[index]}__{shot_ids[index + 1]}"
+        for index in range(len(shot_ids) - 1)
+    ]
+
+
+def build_storyboard_timeline(
+    shots: list[Any] | None,
+    transitions: Mapping[str, Any] | None,
+) -> list[dict[str, str]]:
+    shot_ids = collect_storyboard_shot_ids(shots)
+    transition_map = dict(transitions or {})
+    timeline: list[dict[str, str]] = []
+    for index, shot_id in enumerate(shot_ids):
+        timeline.append({"item_type": "shot", "item_id": shot_id})
+        if index + 1 >= len(shot_ids):
+            continue
+        transition_id = f"transition_{shot_id}__{shot_ids[index + 1]}"
+        transition = transition_map.get(transition_id) or {}
+        if isinstance(transition, Mapping) and transition.get("video_url"):
+            timeline.append({"item_type": "transition", "item_id": transition_id})
+    return timeline
+
+
+def _filter_shot_result_map(
+    results: Mapping[str, Any] | None,
+    valid_shot_ids: set[str],
+) -> dict[str, Any]:
+    filtered: dict[str, Any] = {}
+    for key, value in dict(results or {}).items():
+        entry = value if isinstance(value, Mapping) else {}
+        shot_id = str(entry.get("shot_id", key)).strip()
+        if shot_id not in valid_shot_ids:
+            continue
+        filtered[shot_id] = deepcopy(value)
+    return filtered
+
+
+def _transition_references_invalidated_shot(
+    transition_id: str,
+    transition: Mapping[str, Any] | None,
+    invalidated_shot_ids: set[str],
+) -> bool:
+    if not invalidated_shot_ids:
+        return False
+    if isinstance(transition, Mapping):
+        from_shot_id = str(transition.get("from_shot_id", "")).strip()
+        to_shot_id = str(transition.get("to_shot_id", "")).strip()
+        if from_shot_id in invalidated_shot_ids or to_shot_id in invalidated_shot_ids:
+            return True
+
+    normalized_id = str(transition_id).strip()
+    if normalized_id.startswith("transition_"):
+        pair = normalized_id[len("transition_") :]
+        if "__" in pair:
+            from_shot_id, to_shot_id = pair.split("__", 1)
+            if from_shot_id in invalidated_shot_ids or to_shot_id in invalidated_shot_ids:
+                return True
+    return False
+
+
+def prune_generated_files_to_storyboard(
+    generated_files: Mapping[str, Any] | None,
+    shots: list[Any] | None,
+) -> dict[str, Any]:
+    pruned = deepcopy(dict(generated_files)) if isinstance(generated_files, Mapping) else {}
+    shot_ids = set(collect_storyboard_shot_ids(shots))
+    transition_ids = set(collect_expected_transition_ids(shots))
+
+    for key in ("tts", "images", "videos"):
+        if key not in pruned:
+            continue
+        pruned[key] = _filter_shot_result_map(pruned.get(key), shot_ids)
+
+    if "transitions" in pruned:
+        transitions = {}
+        for transition_id, result in dict(pruned.get("transitions") or {}).items():
+            normalized_id = str(transition_id or (result or {}).get("transition_id", "")).strip()
+            if normalized_id not in transition_ids:
+                continue
+            transitions[normalized_id] = deepcopy(result)
+        pruned["transitions"] = transitions
+
+    if "shots" in pruned and isinstance(pruned.get("shots"), list):
+        pruned["shots"] = [
+            serialize_shot_for_storage(shot)
+            for shot in pruned["shots"]
+            if str((shot or {}).get("shot_id", "")).strip() in shot_ids
+        ]
+
+    if "timeline" in pruned or "transitions" in pruned:
+        pruned["timeline"] = build_storyboard_timeline(shots, pruned.get("transitions"))
+
+    return pruned
+
+
+def _has_authoritative_storyboard_shots(shots: list[Any] | None) -> bool:
+    return bool(collect_storyboard_shot_ids(shots))
+
+
+def _filter_existing_timeline(
+    timeline: Any,
+    *,
+    valid_transition_ids: set[str] | None = None,
+) -> list[dict[str, str]]:
+    if not isinstance(timeline, list):
+        return []
+
+    filtered: list[dict[str, str]] = []
+    for item in timeline:
+        if not isinstance(item, Mapping):
+            continue
+        item_type = str(item.get("item_type", "")).strip()
+        item_id = str(item.get("item_id", "")).strip()
+        if not item_type or not item_id:
+            continue
+        if item_type == "transition" and valid_transition_ids is not None and item_id not in valid_transition_ids:
+            continue
+        filtered.append({"item_type": item_type, "item_id": item_id})
+    return filtered
+
+
+def invalidate_generated_files_for_shots(
+    generated_files: Mapping[str, Any] | None,
+    shots: list[Any] | None,
+    invalidated_shot_ids: list[str] | None,
+    *,
+    clear_videos_for_invalidated_shots: bool = False,
+    clear_final_video: bool = False,
+) -> dict[str, Any]:
+    invalidated_ids = {
+        str(shot_id).strip()
+        for shot_id in invalidated_shot_ids or []
+        if str(shot_id).strip()
+    }
+    has_authoritative_shots = _has_authoritative_storyboard_shots(shots)
+    if has_authoritative_shots:
+        next_generated_files = prune_generated_files_to_storyboard(generated_files, shots)
+    else:
+        next_generated_files = deepcopy(dict(generated_files)) if isinstance(generated_files, Mapping) else {}
+
+    if clear_videos_for_invalidated_shots and "videos" in next_generated_files:
+        next_generated_files["videos"] = {
+            shot_id: deepcopy(result)
+            for shot_id, result in dict(next_generated_files.get("videos") or {}).items()
+            if str((result or {}).get("shot_id", shot_id)).strip() not in invalidated_ids
+        }
+
+    if "transitions" in next_generated_files:
+        next_generated_files["transitions"] = {
+            transition_id: deepcopy(result)
+            for transition_id, result in dict(next_generated_files.get("transitions") or {}).items()
+            if not _transition_references_invalidated_shot(
+                transition_id,
+                result if isinstance(result, Mapping) else None,
+                invalidated_ids,
+            )
+        }
+
+    if has_authoritative_shots and ("timeline" in next_generated_files or "transitions" in next_generated_files):
+        next_generated_files["timeline"] = build_storyboard_timeline(
+            shots,
+            next_generated_files.get("transitions"),
+        )
+    elif "timeline" in next_generated_files:
+        next_generated_files["timeline"] = _filter_existing_timeline(
+            next_generated_files.get("timeline"),
+            valid_transition_ids=set(dict(next_generated_files.get("transitions") or {}).keys()),
+        )
+
+    if clear_final_video:
+        next_generated_files.pop("final_video_url", None)
+
+    return next_generated_files
+
+
 def _merge_shots(
     existing_shots: list[dict[str, Any]],
     incoming_shots: list[Any],
@@ -106,6 +298,8 @@ def _merge_shots(
 def _apply_generated_files_to_shots(
     shots: list[dict[str, Any]],
     generated_files: Mapping[str, Any] | None,
+    *,
+    clear_missing_sections: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     if not isinstance(generated_files, Mapping):
         return shots
@@ -121,7 +315,28 @@ def _apply_generated_files_to_shots(
             shot_map[shot_id] = {"shot_id": shot_id}
         return shot_map[shot_id]
 
-    for result in (generated_files.get("tts") or {}).values():
+    tts_entries = dict(generated_files.get("tts") or {}) if isinstance(generated_files.get("tts"), Mapping) else {}
+    image_entries = dict(generated_files.get("images") or {}) if isinstance(generated_files.get("images"), Mapping) else {}
+    video_entries = dict(generated_files.get("videos") or {}) if isinstance(generated_files.get("videos"), Mapping) else {}
+
+    clear_missing_sections = set(clear_missing_sections or set())
+    has_tts_entries = "tts" in generated_files or "tts" in clear_missing_sections
+    has_image_entries = "images" in generated_files or "images" in clear_missing_sections
+    has_video_entries = "videos" in generated_files or "videos" in clear_missing_sections
+
+    for shot_id, shot in shot_map.items():
+        if has_tts_entries and shot_id not in tts_entries:
+            shot.pop("audio_url", None)
+            shot.pop("audio_duration", None)
+        if has_image_entries and shot_id not in image_entries:
+            shot.pop("image_url", None)
+            shot.pop("image_path", None)
+            shot.pop("last_frame_url", None)
+        if has_video_entries and shot_id not in video_entries:
+            shot.pop("video_url", None)
+            shot.pop("video_path", None)
+
+    for result in tts_entries.values():
         if not isinstance(result, Mapping):
             continue
         shot_id = str(result.get("shot_id", ""))
@@ -134,7 +349,7 @@ def _apply_generated_files_to_shots(
         elif result.get("audio_duration") is not None:
             shot["audio_duration"] = result.get("audio_duration")
 
-    for result in (generated_files.get("images") or {}).values():
+    for result in image_entries.values():
         if not isinstance(result, Mapping):
             continue
         shot_id = str(result.get("shot_id", ""))
@@ -145,7 +360,7 @@ def _apply_generated_files_to_shots(
         shot["image_path"] = result.get("image_path")
         shot.pop("last_frame_url", None)
 
-    for result in (generated_files.get("videos") or {}).values():
+    for result in video_entries.values():
         if not isinstance(result, Mapping):
             continue
         shot_id = str(result.get("shot_id", ""))
@@ -174,6 +389,11 @@ def build_storyboard_generation_state(
     project_id: str = "",
     story_id: str = "",
     final_video_url: str | None = None,
+    replace_generated_files: bool = False,
+    prune_generated_files_to_shots: bool = False,
+    invalidate_shot_ids: list[str] | None = None,
+    clear_videos_for_invalidated_shots: bool = False,
+    clear_final_video: bool = False,
 ) -> dict[str, Any]:
     state = load_storyboard_generation_state(story)
     state.setdefault("shots", [])
@@ -186,14 +406,55 @@ def build_storyboard_generation_state(
         )
     if usage is not None:
         state["usage"] = deepcopy(dict(usage))
+    next_generated_files = state.get("generated_files")
+    should_refresh_shots_from_generated_files = False
+    clear_missing_sections: set[str] = set()
+
     if generated_files is not None:
-        state["generated_files"] = _merge_generated_files(
-            state.get("generated_files"),
-            generated_files,
+        if replace_generated_files:
+            next_generated_files = deepcopy(dict(generated_files)) if isinstance(generated_files, Mapping) else {}
+            clear_missing_sections = {"tts", "images", "videos"}
+        else:
+            next_generated_files = _merge_generated_files(
+                next_generated_files,
+                generated_files,
+            )
+        should_refresh_shots_from_generated_files = True
+    elif isinstance(next_generated_files, Mapping):
+        next_generated_files = deepcopy(dict(next_generated_files))
+
+    if (
+        prune_generated_files_to_shots
+        and isinstance(next_generated_files, Mapping)
+        and _has_authoritative_storyboard_shots(list(state.get("shots") or []))
+    ):
+        next_generated_files = prune_generated_files_to_storyboard(
+            next_generated_files,
+            list(state.get("shots") or []),
         )
+        should_refresh_shots_from_generated_files = True
+
+    if invalidate_shot_ids and isinstance(next_generated_files, Mapping):
+        next_generated_files = invalidate_generated_files_for_shots(
+            next_generated_files,
+            list(state.get("shots") or []),
+            invalidate_shot_ids,
+            clear_videos_for_invalidated_shots=clear_videos_for_invalidated_shots,
+            clear_final_video=clear_final_video,
+        )
+        should_refresh_shots_from_generated_files = True
+    elif clear_final_video and isinstance(next_generated_files, Mapping):
+        next_generated_files.pop("final_video_url", None)
+        should_refresh_shots_from_generated_files = True
+
+    if isinstance(next_generated_files, Mapping):
+        state["generated_files"] = next_generated_files
+
+    if should_refresh_shots_from_generated_files and isinstance(next_generated_files, Mapping):
         state["shots"] = _apply_generated_files_to_shots(
             list(state.get("shots") or []),
-            generated_files,
+            next_generated_files,
+            clear_missing_sections=clear_missing_sections,
         )
     if project_id:
         state["project_id"] = project_id
@@ -203,6 +464,8 @@ def build_storyboard_generation_state(
         state["story_id"] = story_id
     if final_video_url is not None:
         state["final_video_url"] = final_video_url
+    elif clear_final_video:
+        state["final_video_url"] = ""
     state["updated_at"] = datetime.now(timezone.utc).isoformat()
     return state
 
@@ -219,6 +482,11 @@ async def persist_storyboard_generation_state(
     pipeline_id: str = "",
     project_id: str = "",
     final_video_url: str | None = None,
+    replace_generated_files: bool = False,
+    prune_generated_files_to_shots: bool = False,
+    invalidate_shot_ids: list[str] | None = None,
+    clear_videos_for_invalidated_shots: bool = False,
+    clear_final_video: bool = False,
 ) -> dict[str, Any]:
     from app.services import story_repository as repo
 
@@ -241,6 +509,11 @@ async def persist_storyboard_generation_state(
         project_id=project_id,
         story_id=normalized_story_id,
         final_video_url=final_video_url,
+        replace_generated_files=replace_generated_files,
+        prune_generated_files_to_shots=prune_generated_files_to_shots,
+        invalidate_shot_ids=invalidate_shot_ids,
+        clear_videos_for_invalidated_shots=clear_videos_for_invalidated_shots,
+        clear_final_video=clear_final_video,
     )
     await repo.upsert_story_meta_cache(
         db,
@@ -259,6 +532,12 @@ async def persist_generated_files_to_pipeline(
     story_id: str,
     generated_files: Mapping[str, Any] | None = None,
     final_video_url: str | None = None,
+    shots: list[Any] | None = None,
+    replace_generated_files: bool = False,
+    prune_generated_files_to_shots: bool = False,
+    invalidate_shot_ids: list[str] | None = None,
+    clear_videos_for_invalidated_shots: bool = False,
+    clear_final_video: bool = False,
 ) -> dict[str, Any]:
     from app.services import story_repository as repo
 
@@ -275,10 +554,38 @@ async def persist_generated_files_to_pipeline(
         return {}
 
     existing_pipeline = await repo.get_pipeline(db, normalized_pipeline_id)
-    merged_generated_files = _merge_generated_files(
-        existing_pipeline.get("generated_files"),
-        generated_files,
-    )
+    if replace_generated_files:
+        merged_generated_files = deepcopy(dict(generated_files)) if isinstance(generated_files, Mapping) else {}
+    else:
+        merged_generated_files = _merge_generated_files(
+            existing_pipeline.get("generated_files"),
+            generated_files,
+        )
+
+    authoritative_shots = [serialize_shot_for_storage(shot) for shot in shots or []]
+    if not authoritative_shots:
+        storyboard_payload = merged_generated_files.get("storyboard") if isinstance(merged_generated_files, Mapping) else None
+        storyboard_shots = storyboard_payload.get("shots") if isinstance(storyboard_payload, Mapping) else None
+        if isinstance(storyboard_shots, list):
+            authoritative_shots = [serialize_shot_for_storage(shot) for shot in storyboard_shots]
+
+    if prune_generated_files_to_shots and authoritative_shots:
+        merged_generated_files = prune_generated_files_to_storyboard(
+            merged_generated_files,
+            authoritative_shots,
+        )
+
+    if invalidate_shot_ids:
+        merged_generated_files = invalidate_generated_files_for_shots(
+            merged_generated_files,
+            authoritative_shots,
+            invalidate_shot_ids,
+            clear_videos_for_invalidated_shots=clear_videos_for_invalidated_shots,
+            clear_final_video=clear_final_video,
+        )
+    elif clear_final_video:
+        merged_generated_files.pop("final_video_url", None)
+
     if final_video_url is not None:
         merged_generated_files["final_video_url"] = final_video_url
 

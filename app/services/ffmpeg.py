@@ -11,10 +11,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
+from app.paths import IMAGE_DIR, MEDIA_DIR, VIDEO_DIR
+
 logger = logging.getLogger(__name__)
 
-VIDEO_DIR = Path("media/videos")
-IMAGE_DIR = Path("media/images")
 _COMMON_BINARY_DIRS = (
     Path("/opt/homebrew/bin"),
     Path("/usr/local/bin"),
@@ -391,16 +391,14 @@ async def concat_videos(
 
 
 def url_to_local_path(url: str, base_url: str) -> str:
-    """将 URL 转换为本地相对路径。
-
-    例如 http://localhost:8000/media/videos/x.mp4 → media/videos/x.mp4
-    或者 /media/videos/x.mp4 → media/videos/x.mp4
-    """
+    """将 URL 转换为本地媒体绝对路径。"""
     path = url
     if base_url and path.startswith(base_url):
         path = path[len(base_url):]
-    # 去掉前导斜杠
-    return path.lstrip("/")
+    normalized = f"/{path.lstrip('/')}"
+    if normalized.startswith("/media/"):
+        return str((MEDIA_DIR.parent / normalized.lstrip("/")).resolve(strict=False))
+    return str(Path(path).expanduser().resolve(strict=False))
 
 
 _url_to_local_path = url_to_local_path
