@@ -45,7 +45,27 @@
 
       <div v-if="started" class="script-section">
         <h2>剧本</h2>
-        <SceneStream :scenes="store.scenes" :streaming="streaming" />
+        <div v-if="episodeCount" class="episode-slider">
+          <button
+            class="episode-nav-btn"
+            :disabled="!canGoPrev"
+            @click="goPrevEpisode"
+          >
+            ←
+          </button>
+          <div class="episode-slider-center">
+            <div class="episode-slider-label">第 {{ currentEpisode?.episode }} 集 / 共 {{ episodeCount }} 集</div>
+            <div class="episode-slider-title">{{ currentEpisode?.title || '未命名剧集' }}</div>
+          </div>
+          <button
+            class="episode-nav-btn"
+            :disabled="!canGoNext"
+            @click="goNextEpisode"
+          >
+            →
+          </button>
+        </div>
+        <SceneStream :scenes="currentEpisodeScenes" :streaming="streaming" />
         <div v-if="error" class="error-tip" role="alert" aria-live="assertive">{{ error }}</div>
       </div>
 
@@ -66,7 +86,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onUnmounted } from 'vue'
+import { computed, ref, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import StepIndicator from '../components/StepIndicator.vue'
 import OutlinePreview from '../components/OutlinePreview.vue'
@@ -89,11 +109,41 @@ const chatOpen = ref(false)
 const showKeyModal = ref(false)
 const keyModalType = ref('missing')
 const keyModalMsg = ref('')
+const currentEpisodeIndex = ref(0)
+const userPinnedEpisode = ref(false)
 const done = computed(() => store.step3Done && store.scenes.length > 0)
 const started = computed(() => streaming.value || done.value || store.scenes.length > 0)
+const episodeCount = computed(() => store.scenes.length)
+const currentEpisode = computed(() => store.scenes[currentEpisodeIndex.value] || null)
+const currentEpisodeScenes = computed(() => (currentEpisode.value ? [currentEpisode.value] : []))
+const canGoPrev = computed(() => currentEpisodeIndex.value > 0)
+const canGoNext = computed(() => currentEpisodeIndex.value < episodeCount.value - 1)
 
 let scriptAbortController = null
 onUnmounted(() => { scriptAbortController?.abort() })
+
+watch(
+  () => store.scenes.length,
+  (nextLength, previousLength = 0) => {
+    if (!nextLength) {
+      currentEpisodeIndex.value = 0
+      userPinnedEpisode.value = false
+      return
+    }
+
+    const shouldFollowLatest =
+      !userPinnedEpisode.value ||
+      previousLength === 0 ||
+      currentEpisodeIndex.value >= previousLength - 1
+
+    if (shouldFollowLatest) {
+      currentEpisodeIndex.value = nextLength - 1
+      return
+    }
+
+    currentEpisodeIndex.value = Math.min(currentEpisodeIndex.value, nextLength - 1)
+  }
+)
 
 function isAuthError(msg) {
   return /401|403|invalid|incorrect|unauthorized|api.?key/i.test(msg)
@@ -105,6 +155,8 @@ async function startGenerate() {
   scriptAbortController = controller
   streaming.value = true
   error.value = ''
+  currentEpisodeIndex.value = 0
+  userPinnedEpisode.value = false
   store.resetScenes()
   try {
     await streamScript(
@@ -138,50 +190,18 @@ async function startGenerate() {
     }
   }
 }
+
+function goPrevEpisode() {
+  if (!canGoPrev.value) return
+  currentEpisodeIndex.value -= 1
+  userPinnedEpisode.value = true
+}
+
+function goNextEpisode() {
+  if (!canGoNext.value) return
+  currentEpisodeIndex.value += 1
+  userPinnedEpisode.value = currentEpisodeIndex.value < episodeCount.value - 1
+}
 </script>
 
-<style scoped>
-.page { min-height: 100vh; background: #f5f5f7; padding: 32px 16px; }
-.content { max-width: 900px; margin: 32px auto 0; }
-.title-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
-.subtitle { color: #888; }
-.top-row { display: flex; gap: 16px; align-items: flex-start; }
-.outline-col { flex: 1; min-width: 0; }
-.graph-col { width: 380px; flex-shrink: 0; position: sticky; top: 24px; }
-.generate-btn {
-  margin-top: 24px;
-  width: 100%;
-  padding: 16px;
-  background: linear-gradient(135deg, #6c63ff, #a78bfa);
-  color: #fff;
-  border-radius: 14px;
-  font-size: 16px;
-  font-weight: 600;
-  transition: opacity 0.2s;
-}
-.generate-btn:hover:not(:disabled) { opacity: 0.9; }
-.generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.script-section { margin-top: 28px; }
-.script-section h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
-.btn-row { display: flex; gap: 12px; margin-top: 28px; }
-.back-btn {
-  padding: 14px 20px;
-  background: #fff;
-  color: #555;
-  border-radius: 12px;
-  font-size: 15px;
-  border: 2px solid #e0e0e0;
-}
-.next-btn {
-  flex: 1;
-  padding: 14px;
-  background: #6c63ff;
-  color: #fff;
-  border-radius: 12px;
-  font-size: 15px;
-  font-weight: 600;
-}
-.next-btn:hover { background: #5a52e0; }
-.error-tip { margin-top: 12px; color: #e53935; font-size: 13px; text-align: center; }
-</style>
+<style scoped src="../style/step3script.css"></style>
