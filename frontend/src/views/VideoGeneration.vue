@@ -271,12 +271,12 @@
         <div class="storyboard-header">
           <h2>{{ shots.length }} 个分镜 · 共 {{ totalDuration }} 秒</h2>
           <div class="action-group">
-            <select v-model="selectedVoice" class="voice-select">
+            <select v-if="speechGenerationEnabled" v-model="selectedVoice" class="voice-select">
               <option v-for="voice in voices" :key="voice.id" :value="voice.id">
                 {{ voice.name }}
               </option>
             </select>
-            <button class="action-btn" @click="generateAllTTS">全部生成语音</button>
+            <button v-if="speechGenerationEnabled" class="action-btn" @click="generateAllTTS">全部生成语音</button>
             <button class="action-btn" @click="generateAllImages">全部生成图片</button>
             <button class="action-btn" @click="generateAllVideos">全部生成视频</button>
             <button
@@ -319,7 +319,7 @@
                 <p class="en">{{ item.shot.final_video_prompt || item.shot.visual_prompt }}</p>
               </div>
 
-              <div v-if="hasSpeechAudio(item.shot)" class="tts-bar">
+              <div v-if="speechGenerationEnabled && hasSpeechAudio(item.shot)" class="tts-bar">
                 <button class="tts-btn" @click="generateOneTTS(item.shot.shot_id)" :disabled="item.shot.ttsLoading">
                   {{ item.shot.ttsLoading ? '生成中...' : '生成语音' }}
                 </button>
@@ -457,6 +457,7 @@ const isGenerating = ref(false)
 const error = ref('')
 const transitionMessage = ref('')
 const shots = computed(() => storyStore.shots)
+const speechGenerationEnabled = false
 const voices = ref([])
 const selectedVoice = ref('')
 const showKeyModal = ref(false)
@@ -961,6 +962,23 @@ function isAuthError(msg) {
   return /401|403|invalid|incorrect|unauthorized|api.?key/i.test(msg)
 }
 
+function createApiError(status, detail, fallbackMessage = '请求失败') {
+  const error = new Error(detail || fallbackMessage)
+  error.status = status
+  return error
+}
+
+async function readApiError(response, fallbackMessage = '请求失败') {
+  let detail = ''
+  try {
+    const errData = await response.json()
+    detail = errData?.detail || ''
+  } catch {
+    detail = ''
+  }
+  return createApiError(response.status, detail || `${fallbackMessage} (${response.status})`)
+}
+
 // 解析分镜
 async function parseStoryboard() {
   const script = getScript()
@@ -1083,8 +1101,7 @@ async function parseStoryboard() {
     })
 
     if (!res.ok) {
-      const errData = await res.json()
-      throw new Error(errData.detail || '请求失败')
+      throw await readApiError(res, '请求失败')
     }
 
     progress.value = { show: true, label: '解析完成，渲染卡片...', percent: 90 }
@@ -1112,7 +1129,11 @@ async function parseStoryboard() {
     if (err.name === 'AbortError') return
     if (!isMounted.value) return
     const msg = err.message || '请求失败'
-    if (isAuthError(msg)) {
+    if (err.status === 400) {
+      keyModalType.value = 'missing'
+      keyModalMsg.value = '缺少 API Key，请先在设置页填写可用的密钥。'
+      showKeyModal.value = true
+    } else if (isAuthError(msg)) {
       keyModalType.value = 'invalid'
       keyModalMsg.value = 'API Key 无效或已过期，请检查后重新设置。'
       showKeyModal.value = true
@@ -1610,7 +1631,9 @@ async function concatAllVideos() {
 }
 
 onMounted(async () => {
-  loadVoices()
+  if (speechGenerationEnabled) {
+    loadVoices()
+  }
   storyStore.ensureSceneReferenceAssets()
   concatVideoUrl.value = storyStore.storyboardFinalVideoUrl || storyStore.meta?.storyboard_generation?.final_video_url || ''
   rememberManualPipelineContext({

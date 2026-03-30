@@ -7,12 +7,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.database import init_db
+from app.paths import FRONTEND_DIST_DIR, FRONTEND_INDEX_FILE, MEDIA_DIR
 from app.routers import character, image, pipeline, story, tts, video
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-MEDIA_DIR = BASE_DIR / "media"
-FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
-FRONTEND_INDEX_FILE = FRONTEND_DIST_DIR / "index.html"
 FRONTEND_RESERVED_PREFIXES = (
     "api",
     "media",

@@ -1,8 +1,50 @@
 import { defineStore } from 'pinia'
 
-// 开发环境默认允许 Mock，部署环境默认关闭；如需强制覆盖，可设置 VITE_ENABLE_MOCK=true/false
+// Mock 改为显式开启：只有设置 VITE_ENABLE_MOCK=true 时才启用。
+// 这样浏览器本地未填写 llmApiKey 时，前端不会抢先进入 Mock，后端仍可使用 .env 默认凭证。
 const MOCK_ENABLED = import.meta.env.VITE_ENABLE_MOCK === 'true'
-  || (import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK !== 'false')
+
+function shouldSendLlmProvider(state) {
+  const provider = String(state.llmProvider || '').trim()
+  if (!provider) return false
+
+  // 默认 claude 只是前端展示默认值；当用户未填写任何本地 LLM 配置时，不要把它发给后端，
+  // 否则会覆盖后端 .env 里的 DEFAULT_LLM_PROVIDER。
+  return (
+    provider !== 'claude'
+    || !!String(state.llmApiKey || '').trim()
+    || !!String(state.llmModel || '').trim()
+  )
+}
+
+function hasStoredSetting(key) {
+  if (typeof window === 'undefined' || !window.localStorage) return false
+  return window.localStorage.getItem(key) !== null
+}
+
+function shouldSendImageConfig(state) {
+  return (
+    hasStoredSetting('imageProvider')
+    || hasStoredSetting('imageApiKey')
+    || hasStoredSetting('imageBaseUrl')
+    || hasStoredSetting('imageModel')
+    || !!String(state.imageApiKey || '').trim()
+    || !!String(state.imageBaseUrl || '').trim()
+    || !!String(state.imageModel || '').trim()
+  )
+}
+
+function shouldSendVideoConfig(state) {
+  return (
+    hasStoredSetting('videoProvider')
+    || hasStoredSetting('videoApiKey')
+    || hasStoredSetting('videoBaseUrl')
+    || hasStoredSetting('videoModel')
+    || !!String(state.videoApiKey || '').trim()
+    || !!String(state.videoBaseUrl || '').trim()
+    || !!String(state.videoModel || '').trim()
+  )
+}
 
 export const LLM_PROVIDERS = [
   {
@@ -196,25 +238,28 @@ export const useSettingsStore = defineStore('settings', {
   }),
 
   getters: {
-    useMock: (state) => MOCK_ENABLED && !state.llmApiKey,
+    useMock: (state) => MOCK_ENABLED && !String(state.llmApiKey || '').trim(),
 
-    effectiveLlmProvider:  (state) => state.llmProvider,
-    effectiveLlmBaseUrl:   (state) => state.llmBaseUrl,
+    // 未显式保存任何前端 LLM 设置时，不发送默认 claude，交给后端 .env 决定默认 provider。
+    effectiveLlmProvider:  (state) => shouldSendLlmProvider(state) ? state.llmProvider : '',
+    // 本地未填写 LLM key 时，不发送 base_url，避免把默认官方地址误判成“自定义中转”。
+    effectiveLlmBaseUrl:   (state) => String(state.llmApiKey || '').trim() ? state.llmBaseUrl : '',
     effectiveLlmApiKey:    (state) => state.llmApiKey,
     effectiveLlmModel:     (state) => state.llmModel,
     effectiveScriptModel:   (state) => state.scriptModel,
     effectiveScriptProvider:(state) => state.scriptProvider,
     effectiveScriptApiKey:  (state) => state.scriptApiKey,
-    effectiveScriptBaseUrl: (state) => state.scriptBaseUrl,
+    effectiveScriptBaseUrl: (state) => String(state.scriptApiKey || '').trim() ? state.scriptBaseUrl : '',
 
-    effectiveImageApiKey:  (state) => state.imageApiKey,
-    effectiveImageBaseUrl: (state) => state.imageBaseUrl,
-    effectiveImageModel:   (state) => state.imageModel,
+    effectiveImageProvider: (state) => shouldSendImageConfig(state) ? state.imageProvider : '',
+    effectiveImageApiKey:   (state) => shouldSendImageConfig(state) ? state.imageApiKey : '',
+    effectiveImageBaseUrl:  (state) => shouldSendImageConfig(state) ? state.imageBaseUrl : '',
+    effectiveImageModel:    (state) => shouldSendImageConfig(state) ? state.imageModel : '',
 
-    effectiveVideoProvider: (state) => state.videoProvider,
-    effectiveVideoApiKey:   (state) => state.videoApiKey,
-    effectiveVideoBaseUrl:  (state) => state.videoBaseUrl,
-    effectiveVideoModel:    (state) => state.videoModel,
+    effectiveVideoProvider: (state) => shouldSendVideoConfig(state) ? state.videoProvider : '',
+    effectiveVideoApiKey:   (state) => shouldSendVideoConfig(state) ? state.videoApiKey : '',
+    effectiveVideoBaseUrl:  (state) => shouldSendVideoConfig(state) ? state.videoBaseUrl : '',
+    effectiveVideoModel:    (state) => shouldSendVideoConfig(state) ? state.videoModel : '',
   },
 
   actions: {

@@ -12,12 +12,13 @@ from app.core.api_keys import (
     get_art_style,
     image_config_dep,
     llm_config_dep,
-    resolve_image_key,
+    resolve_image_config,
     resolve_llm_config,
-    validate_user_base_url,
+    resolve_video_config,
     video_config_dep,
 )
-from app.core.config import settings as _cfg
+from app.core.model_defaults import resolve_image_model, resolve_video_model
+from app.paths import MEDIA_DIR
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.pipeline_runtime import get_runtime_strategy_note, resolve_tracking_story_id
 from app.core.story_context import build_generation_payload
@@ -304,7 +305,17 @@ def _serialize_timeline(shots: list[dict], transitions: dict[str, dict] | None) 
 
 
 def _url_from_local_media_path(path: str) -> str:
-    normalized = str(Path(path)).replace("\\", "/").lstrip("/")
+    candidate = Path(path)
+    try:
+        resolved_candidate = candidate.resolve(strict=False)
+        resolved_media_dir = MEDIA_DIR.resolve(strict=False)
+        if resolved_candidate.is_relative_to(resolved_media_dir):
+            relative = resolved_candidate.relative_to(resolved_media_dir)
+            return f"/media/{str(relative).replace('\\', '/')}"
+    except (OSError, RuntimeError, ValueError):
+        pass
+
+    normalized = str(candidate).replace("\\", "/").lstrip("/")
     return f"/{normalized}"
 
 
@@ -431,19 +442,24 @@ async def auto_generate(
         keys.llm_provider or req.provider or "",
         keys.llm_model or req.model or "",
     )
-    image_api_key = resolve_image_key(keys.image_api_key or req.image_api_key or "")
-    validated_image_base_url = validate_user_base_url(keys.image_base_url)
-    if validated_image_base_url and not keys.image_api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="Custom X-Image-Base-URL requires X-Image-API-Key.",
-        )
-    image_base_url = validated_image_base_url or _cfg.siliconflow_base_url
+    image_cfg = resolve_image_config(
+        keys.image_api_key or req.image_api_key or "",
+        keys.image_base_url,
+        keys.image_provider,
+    )
+    image_api_key = image_cfg["image_api_key"]
+    image_base_url = image_cfg["image_base_url"]
+    resolved_image_model = resolve_image_model(req.image_model or "", image_base_url)
 
-    video_cfg = video_config_dep(request)
+    video_cfg = resolve_video_config(
+        keys.video_api_key or req.video_api_key or "",
+        keys.video_base_url,
+        keys.video_provider,
+    )
     video_api_key = video_cfg["video_api_key"]
     video_base_url = video_cfg["video_base_url"]
     video_provider = video_cfg["video_provider"]
+    resolved_video_model = resolve_video_model(req.video_model or "", video_provider)
     art_style = req.art_style or get_art_style(request)
 
     async def _run_pipeline() -> None:
@@ -489,8 +505,8 @@ async def auto_generate(
                 provider=resolved_llm["provider"] or req.provider,
                 model=resolved_llm["model"] or req.model,
                 voice=req.voice,
-                image_model=req.image_model,
-                video_model=req.video_model,
+                image_model=resolved_image_model,
+                video_model=resolved_video_model,
                 base_url=public_base_url,
                 llm_api_key=resolved_llm["api_key"],
                 llm_base_url=resolved_llm["base_url"],
@@ -651,7 +667,7 @@ async def generate_assets(
     generate_tts: bool = Query(True, description="Whether to generate TTS in this batch run"),
     generate_images: bool = Query(True, description="Whether to generate images in this batch run"),
     voice: str = Query("zh-CN-XiaoxiaoNeural", description="TTS voice"),
-    image_model: str = Query("black-forest-labs/FLUX.1-schnell", description="Image model"),
+    image_model: str | None = Query(None, description="Image model"),
     story_id: str | None = Query(None, description="Stable story id for StoryContext loading"),
     background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
@@ -673,6 +689,7 @@ async def generate_assets(
     shots = storyboard.shots
     total = len(shots)
     art_style = get_art_style(request)
+    effective_image_model = resolve_image_model(image_model or "", image_config.get("image_base_url", ""))
 
     initial_pipeline = await _persist_manual_pipeline_state(
         db,
@@ -765,7 +782,7 @@ async def generate_assets(
                         build_generation_payload(shot, story_context, art_style=art_style, story=story)
                         for shot in shots
                     ],
-                    model=image_model,
+                    model=effective_image_model,
                     art_style=art_style,
                     **image_config,
                 )
@@ -863,7 +880,7 @@ async def render_video(
     video_config: dict = Depends(video_config_dep),
     llm: dict = Depends(llm_config_dep),
     base_url: str | None = Query(None, description="Backend base url"),
-    video_model: str = Query("wan2.6-i2v-flash", description="Video model"),
+    video_model: str | None = Query(None, description="Video model"),
     pipeline_id: str | None = Query(None, description="Optional manual pipeline id"),
     story_id: str | None = Query(None, description="Stable story id for StoryContext loading"),
     background_tasks: BackgroundTasks = None,
@@ -876,6 +893,7 @@ async def render_video(
     public_base_url = _resolve_public_base_url(request, base_url or "")
     art_style = get_art_style(request)
     total = len(shots_data)
+    effective_video_model = resolve_video_model(video_model or "", video_config.get("video_provider", ""))
 
     initial_pipeline = await _persist_manual_pipeline_state(
         db,
@@ -923,7 +941,7 @@ async def render_video(
             video_results = await video.generate_videos_batch(
                 shots=prepared_shots,
                 base_url=public_base_url,
-                model=video_model,
+                model=effective_video_model,
                 art_style=art_style,
                 **video_config,
             )
@@ -1171,7 +1189,7 @@ async def generate_transition(
             first_frame_url=_absolute_media_url(from_frame_url, base_url),
             last_frame_url=_absolute_media_url(to_frame_url, base_url),
             prompt=transition_prompt,
-            model=req.model or "doubao-seedance-1-5-pro-251215",
+            model=resolve_video_model(req.model or "", video_config["video_provider"]),
             video_api_key=video_config["video_api_key"],
             video_base_url=video_config["video_base_url"],
             video_provider=video_config["video_provider"],

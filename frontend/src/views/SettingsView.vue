@@ -8,7 +8,7 @@
     <div class="content">
       <div class="mode-banner" :class="store.useMock ? 'mock' : 'live'">
         <span class="mode-dot" />
-        {{ store.useMock ? 'Mock 模式：使用预设数据，无需 API Key' : '真实模式：调用 API 接口' }}
+        {{ store.useMock ? 'Mock 模式：使用预设数据，无需 API Key' : '真实模式：调用 API 接口，可回退到后端 .env 默认值' }}
       </div>
 
       <!-- 后端服务 -->
@@ -55,6 +55,7 @@
             <button class="toggle-btn" @click="showLlmKey = !showLlmKey">{{ showLlmKey ? '隐藏' : '显示' }}</button>
           </div>
           <span class="hint">密钥仅保存在本地浏览器中</span>
+          <span class="hint">留空时，后端会尝试使用 .env 中的默认 LLM 配置</span>
         </div>
         <div class="field">
           <label>模型</label>

@@ -4,18 +4,17 @@ import logging
 import re
 import time
 from collections import OrderedDict
-from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
 import httpx
 
 from app.core.api_keys import inject_art_style
+from app.paths import VIDEO_DIR
 from app.services.video_providers.factory import get_video_provider
 
 logger = logging.getLogger(__name__)
 
-VIDEO_DIR = Path("media/videos")
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_MODEL = "wan2.6-i2v-flash"

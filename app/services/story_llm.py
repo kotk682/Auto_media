@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 def _should_use_dev_mock(api_key: str, feature_name: str) -> bool:
-    if api_key:
+    normalized_key = str(api_key or "").strip()
+    if normalized_key:
         return False
     if settings.debug:
         return True
@@ -246,6 +247,8 @@ def _parse_json(content: str):
 async def refine(story_id: str, change_type: str, change_summary: str, db: AsyncSession, api_key: str = "", base_url: str = "", provider: str = "", model: str = "") -> dict:
     import json as _json
     story = await repo.get_story(db, story_id)
+    if not story:
+        raise HTTPException(status_code=404, detail="故事不存在")
     if _should_use_dev_mock(api_key, "故事细化"):
         return {"characters": None, "relationships": None, "outline": None, "meta_theme": None}
 
@@ -408,6 +411,8 @@ async def generate_script(story_id: str, db: AsyncSession, api_key: str = "", ba
         return
 
     story = await repo.get_story(db, story_id)
+    if not story:
+        raise HTTPException(status_code=404, detail="故事不存在")
     outline = story.get("outline", [])
     if not outline:
         if settings.debug:

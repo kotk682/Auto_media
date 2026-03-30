@@ -74,10 +74,10 @@ class AutoGenerateRequest(BaseModel):
     voice: str = "zh-CN-XiaoxiaoNeural"
 
     # 图片生成配置
-    image_model: str = "black-forest-labs/FLUX.1-schnell"
+    image_model: Optional[str] = None
 
     # 视频生成配置
-    video_model: str = "wan2.6-i2v-flash"
+    video_model: Optional[str] = None
 
     # 服务地址（用于拼接本地文件 URL）
     base_url: str = ""

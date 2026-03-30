@@ -7,7 +7,7 @@ export function resolveBackendBaseUrl(configuredBackendUrl = '', { preferRelativ
   if (configured) return configured
 
   if (import.meta.env.DEV) {
-    return preferRelativeInDev ? '' : 'http://localhost:8000'
+    return ''
   }
 
   if (typeof window !== 'undefined' && window.location?.origin) {

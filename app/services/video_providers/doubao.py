@@ -1,7 +1,9 @@
 import asyncio
 import base64
+import ipaddress
 import mimetypes
 import re
+import socket
 
 import httpx
 
@@ -121,8 +123,36 @@ async def _to_data_url(image_url: str) -> str:
     """若 image_url 是本地/内网地址，先下载再转为 base64 data URL；否则原样返回。"""
     from urllib.parse import urlparse
     parsed = urlparse(image_url)
-    host = parsed.hostname or ""
-    is_local = host in ("localhost", "127.0.0.1", "0.0.0.0") or host.startswith("192.168.") or host.startswith("10.")
+    host = (parsed.hostname or "").strip().lower()
+
+    def _is_private_or_local_ip(value: str) -> bool:
+        if value in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
+            return True
+        try:
+            ip = ipaddress.ip_address(value)
+        except ValueError:
+            return False
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_unspecified
+        )
+
+    is_local = _is_private_or_local_ip(host) or host.endswith(".local")
+    if not is_local and host:
+        try:
+            loop = asyncio.get_running_loop()
+            addrinfo = await loop.getaddrinfo(host, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+        except OSError:
+            addrinfo = []
+        for entry in addrinfo:
+            sockaddr = entry[4]
+            if sockaddr and _is_private_or_local_ip(str(sockaddr[0]).strip().lower()):
+                is_local = True
+                break
+
     if not is_local:
         return image_url
     async with httpx.AsyncClient(timeout=30) as client:

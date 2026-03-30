@@ -1,18 +1,18 @@
 # API Key 管理指南
 
-> 更新日期：2026-03-23
+> 更新日期：2026-03-30
 
 ---
 
 ## 概述
 
-AutoMedia 采用**三段式 Key 回退链**：
+AutoMedia 采用**三段式配置回退链**：
 
 ```
-前端 Header → .env 环境变量 → HTTP 400 错误
+前端 Header / Body → .env 环境变量 → 内置默认值或 HTTP 400 错误
 ```
 
-前端设置页面提供三个独立配置块（文本 / 图片 / 视频），各模块均有独立的服务商、API Key、Base URL 和模型选择，互不继承。
+前端设置页面提供独立的文本、分镜专用文本、图片、视频配置块；服务商、API Key、Base URL、模型互不继承，`.env` 作为前端未填写时的服务端默认值。
 
 ---
 
@@ -27,6 +27,10 @@ AutoMedia 采用**三段式 Key 回退链**：
 | `llmApiKey` | `llmApiKey` | `""` |
 | `llmBaseUrl` | `llmBaseUrl` | `""` |
 | `llmModel` | `llmModel` | `""` |
+| `scriptProvider` | `scriptProvider` | `""` |
+| `scriptApiKey` | `scriptApiKey` | `""` |
+| `scriptBaseUrl` | `scriptBaseUrl` | `""` |
+| `scriptModel` | `scriptModel` | `""` |
 | `imageProvider` | `imageProvider` | `siliconflow` |
 | `imageApiKey` | `imageApiKey` | `""` |
 | `imageBaseUrl` | `imageBaseUrl` | `""` |
@@ -40,14 +44,16 @@ AutoMedia 采用**三段式 Key 回退链**：
 
 | Getter | 说明 |
 |--------|------|
-| `useMock` | `MOCK_ENABLED && !llmApiKey`，LLM Key 未填时启用 Mock 模式 |
+| `useMock` | `VITE_ENABLE_MOCK=true` 且 `llmApiKey` 为空时启用 Mock 模式 |
 | `effectiveLlmProvider/ApiKey/BaseUrl/Model` | 直接读对应 state |
 | `effectiveImageApiKey/BaseUrl/Model` | 直接读对应 state |
 | `effectiveVideoProvider/ApiKey/BaseUrl/Model` | 直接读对应 state |
 
 ### Mock 模式
 
-`MOCK_ENABLED = true`（`settings.js` 顶部常量）。Mock 模式下，`getHeaders()` 不发送任何 LLM 相关 Header，后端 `story_llm.py` 在 `api_key == ""` 时回退到 `story_mock.py`。发布时将常量改为 `false` 即可禁用。
+`MOCK_ENABLED` 现在只在显式设置 `VITE_ENABLE_MOCK=true` 时启用。默认情况下，即使前端本地未填写 `llmApiKey`，前端也会保持真实模式，让后端继续使用 `.env` 中的默认 LLM 凭证。
+
+Mock 模式下，`getHeaders()` 不发送任何 LLM 相关 Header，后端 `story_llm.py` 在 `api_key == ""` 时回退到 `story_mock.py`。
 
 ### localStorage 迁移（migrateV1）
 
@@ -63,6 +69,10 @@ AutoMedia 采用**三段式 Key 回退链**：
 | `X-LLM-Base-URL` | `effectiveLlmBaseUrl` | 非 Mock 模式且有值 |
 | `X-LLM-Provider` | `effectiveLlmProvider` | 非 Mock 模式且有值 |
 | `X-LLM-Model` | `effectiveLlmModel` | 非 Mock 模式且有值 |
+| `X-Script-Provider` | `effectiveScriptProvider` | 有值 |
+| `X-Script-API-Key` | `effectiveScriptApiKey` | 有值 |
+| `X-Script-Base-URL` | `effectiveScriptBaseUrl` | 有值 |
+| `X-Script-Model` | `effectiveScriptModel` | 有值 |
 | `X-Image-API-Key` | `effectiveImageApiKey` | 有值 |
 | `X-Image-Base-URL` | `effectiveImageBaseUrl` | 有值 |
 | `X-Video-Provider` | `effectiveVideoProvider` | 有值 |
@@ -70,6 +80,12 @@ AutoMedia 采用**三段式 Key 回退链**：
 | `X-Video-Base-URL` | `effectiveVideoBaseUrl` | 有值 |
 
 空值字段不发送 Header，由后端回退到 `.env`。
+
+补充：
+- 当前端本地没有显式配置 LLM，前端不会把默认展示值 `claude` 强行写进 `X-LLM-Provider`
+- 这样后端可以正确使用 `.env` 中的 `DEFAULT_LLM_PROVIDER`
+- 当前端本地没有填写 LLM Key 时，前端也不会发送 `X-LLM-Base-URL`
+- 这样浏览器里保存的默认官方地址不会被后端误判成“自定义 Base URL”
 
 ---
 
@@ -81,6 +97,7 @@ AutoMedia 采用**三段式 Key 回退链**：
 X-LLM-API-Key header → .env <provider>_API_KEY → HTTP 400
 X-LLM-Base-URL header → .env <provider>_BASE_URL
 X-LLM-Provider header → settings.default_llm_provider（默认 claude）
+X-LLM-Model header → 代码内 provider 默认模型
 ```
 
 已支持的 Provider：`claude`、`openai`、`qwen`、`zhipu`、`gemini`、`siliconflow`
@@ -92,21 +109,27 @@ X-LLM-Provider header → settings.default_llm_provider（默认 claude）
 ### Image（`image_config_dep`）
 
 ```
-X-Image-API-Key header → .env SILICONFLOW_API_KEY → HTTP 400
-X-Image-Base-URL header → .env SILICONFLOW_BASE_URL
+X-Image-API-Key header → .env SILICONFLOW_IMAGE_API_KEY / DOUBAO_IMAGE_API_KEY → HTTP 400
+X-Image-Base-URL header → .env SILICONFLOW_IMAGE_BASE_URL / DOUBAO_IMAGE_BASE_URL
+Request body model → .env DOUBAO_IMAGE_MODEL / SILICONFLOW_IMAGE_MODEL / DEFAULT_IMAGE_MODEL
 ```
 
 后端使用 OpenAI 兼容的 `/images/generations` 接口，响应格式为 `{"images": [{"url": "..."}]}`。
+前端不会发送 `X-Image-Provider`，因此后端会根据 `X-Image-Base-URL` 推断图片 provider。
+若 `X-Image-Base-URL` 命中已知图片服务商（SiliconFlow / 豆包），即使前端没有传图片 Key，后端仍会继续回退到该图片服务商对应的 `.env` Key。
+如果图片服务商是豆包 / 火山方舟，模型通常应填写端点 ID（`ep-...`）；前端未传时，后端会尝试读取 `.env` 中的 `DOUBAO_IMAGE_MODEL`。
 
 ### Video（`video_config_dep`）
 
 ```
 X-Video-Provider header → "dashscope"（默认）
-X-Video-API-Key header  → .env DASHSCOPE_API_KEY / KLING_API_KEY → HTTP 400
-X-Video-Base-URL header → .env DASHSCOPE_BASE_URL / KLING_BASE_URL
+X-Video-API-Key header  → .env DASHSCOPE_VIDEO_API_KEY / KLING_VIDEO_API_KEY / MINIMAX_VIDEO_API_KEY / DOUBAO_VIDEO_API_KEY → HTTP 400
+X-Video-Base-URL header → .env DASHSCOPE_VIDEO_BASE_URL / KLING_VIDEO_BASE_URL / MINIMAX_VIDEO_BASE_URL / DOUBAO_VIDEO_BASE_URL
+Request body model → .env DASHSCOPE_VIDEO_MODEL / KLING_VIDEO_MODEL / MINIMAX_VIDEO_MODEL / DOUBAO_VIDEO_MODEL / DEFAULT_VIDEO_MODEL
 ```
 
-已支持的 Provider：`dashscope`（Wan 系列）、`kling`（快手可灵）
+已支持的 Provider：`dashscope`（Wan 系列）、`kling`（快手可灵）、`minimax`（海螺视频）、`doubao`（火山方舟）
+前端若传入的是已知视频 provider 的默认 Base URL，即使未填写视频 Key，后端也会继续回退到对应视频 provider 的 `.env` Key。
 
 ---
 
@@ -118,7 +141,8 @@ X-Video-Base-URL header → .env DASHSCOPE_BASE_URL / KLING_BASE_URL
 - 提交：`POST {base_url}/services/aigc/image2video/video-synthesis`（`X-DashScope-Async: enable`）
 - 轮询：`GET {base_url}/tasks/{task_id}`
 - Auth：`Authorization: Bearer {api_key}`
-- .env key：`DASHSCOPE_API_KEY`
+- .env key：`DASHSCOPE_VIDEO_API_KEY`
+- .env model：`DASHSCOPE_VIDEO_MODEL`
 
 ### Kling（快手可灵）
 
@@ -127,7 +151,28 @@ X-Video-Base-URL header → .env DASHSCOPE_BASE_URL / KLING_BASE_URL
 - 轮询：`GET {base_url}/v1/videos/image2video/{task_id}`
 - Auth：JWT token（由 access_key_id + secret_key 生成，有效期 30 分钟）
 - **API Key 格式**：`access_key_id:secret_key`（冒号拼接两个字段，在可灵开放平台获取）
-- .env key：`KLING_API_KEY`（同样用冒号格式）
+- .env key：`KLING_VIDEO_API_KEY`（同样用冒号格式）
+- .env model：`KLING_VIDEO_MODEL`
+
+### MiniMax 海螺视频
+
+- API 类型：MiniMax 图生视频异步任务 API
+- 提交：`POST {base_url}/v1/video_generation`
+- 轮询：`GET {base_url}/v1/query/video_generation`
+- 取回文件：`GET {base_url}/v1/files/retrieve`
+- Auth：`Authorization: Bearer {api_key}`
+- .env key：`MINIMAX_VIDEO_API_KEY`
+- .env model：`MINIMAX_VIDEO_MODEL`
+
+### 豆包 / 火山方舟 Ark
+
+- 图片和视频模型都建议使用端点 ID（`ep-...`）
+- 图片 .env key：`DOUBAO_IMAGE_API_KEY`
+- 图片 .env base_url：`DOUBAO_IMAGE_BASE_URL`
+- 图片模型：`DOUBAO_IMAGE_MODEL`
+- 视频 .env key：`DOUBAO_VIDEO_API_KEY`
+- 视频 .env base_url：`DOUBAO_VIDEO_BASE_URL`
+- 视频模型：`DOUBAO_VIDEO_MODEL`
 
 ---
 
@@ -150,8 +195,7 @@ X-Video-Base-URL header → .env DASHSCOPE_BASE_URL / KLING_BASE_URL
 | Provider ID | 服务商 | Base URL | 接口格式 |
 |-------------|--------|---------|---------|
 | `siliconflow` | SiliconFlow | `https://api.siliconflow.cn/v1` | OpenAI 兼容（SiliconFlow 格式） |
-| `openai` | OpenAI | `https://api.openai.com/v1` | OpenAI DALL-E |
-| `zhipu` | 智谱 CogView | `https://open.bigmodel.cn/api/paas/v4/` | OpenAI 兼容 |
+| `doubao` | 豆包（火山方舟） | `https://ark.cn-beijing.volces.com/api/v3` | OpenAI 兼容，模型一般填 `ep-...` |
 | `custom` | 自定义 | 手动填写 | — |
 
 ### 视频提供商（`VIDEO_PROVIDERS`）
@@ -160,6 +204,8 @@ X-Video-Base-URL header → .env DASHSCOPE_BASE_URL / KLING_BASE_URL
 |-------------|--------|---------|---------|
 | `dashscope` | 阿里云 DashScope | `https://dashscope.aliyuncs.com/api/v1` | ✅ |
 | `kling` | 快手可灵 Kling | `https://api.klingai.com` | ✅ |
+| `minimax` | MiniMax 海螺视频 | `https://api.minimaxi.chat` | ✅ |
+| `doubao` | 豆包 Seedance（火山方舟） | `https://ark.cn-beijing.volces.com/api/v3` | ✅ |
 | `custom` | 自定义 | 手动填写 | — |
 
 ---
@@ -180,7 +226,9 @@ app/
 │   │   ├── base.py
 │   │   ├── factory.py
 │   │   ├── dashscope.py
-│   │   └── kling.py
+│   │   ├── kling.py
+│   │   ├── minimax.py
+│   │   └── doubao.py
 │   ├── image.py           # 图片生成（OpenAI 兼容接口）
 │   ├── video.py           # 视频生成入口（调用 video_providers 工厂）
 │   └── story_llm.py       # LLM 调用（含 Mock 回退）
@@ -200,17 +248,37 @@ OPENAI_API_KEY=sk-xxx
 QWEN_API_KEY=sk-xxx
 ZHIPU_API_KEY=xxx
 GEMINI_API_KEY=xxx
-SILICONFLOW_API_KEY=sk-xxx       # LLM + 图片共用
+SILICONFLOW_API_KEY=sk-xxx
 
 # 图片生成（SiliconFlow）
-SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1   # 可选，有默认值
+SILICONFLOW_IMAGE_API_KEY=sk-xxx
+SILICONFLOW_IMAGE_BASE_URL=https://api.siliconflow.cn/v1
+SILICONFLOW_IMAGE_MODEL=black-forest-labs/FLUX.1-schnell
 
-# 视频生成
-DASHSCOPE_API_KEY=sk-xxx
-DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1  # 可选
+# 图片生成（豆包 / 火山方舟）
+DOUBAO_IMAGE_API_KEY=sk-xxx
+DOUBAO_IMAGE_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+DOUBAO_IMAGE_MODEL=ep-xxxxxxxxxxxxxxxx
 
-KLING_API_KEY=access_key_id:secret_key               # Kling 格式
-KLING_BASE_URL=https://api.klingai.com               # 可选
+# 视频生成（DashScope）
+DASHSCOPE_VIDEO_API_KEY=sk-xxx
+DASHSCOPE_VIDEO_BASE_URL=https://dashscope.aliyuncs.com/api/v1
+DASHSCOPE_VIDEO_MODEL=wan2.6-i2v-flash
+
+# 视频生成（Kling）
+KLING_VIDEO_API_KEY=access_key_id:secret_key         # Kling 格式
+KLING_VIDEO_BASE_URL=https://api.klingai.com
+KLING_VIDEO_MODEL=kling-v2-master
+
+# 视频生成（MiniMax）
+MINIMAX_VIDEO_API_KEY=sk-xxx
+MINIMAX_VIDEO_BASE_URL=https://api.minimaxi.chat
+MINIMAX_VIDEO_MODEL=video-01
+
+# 视频生成（豆包 / 火山方舟，建议填写端点 ID）
+DOUBAO_VIDEO_API_KEY=sk-xxx
+DOUBAO_VIDEO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+DOUBAO_VIDEO_MODEL=ep-yyyyyyyyyyyyyyyy
 ```
 
 ---
@@ -220,7 +288,8 @@ KLING_BASE_URL=https://api.klingai.com               # 可选
 - **日志脱敏**：`mask_key()` 只输出 `sk-a...xxxx` 格式
 - **前置校验**：Key 缺失时在服务调用前返回 HTTP 400，不发起外部请求
 - **SSRF 防护**：`validate_user_base_url()` 拒绝内网/loopback IP，可选开启 DNS 解析校验（`VALIDATE_BASE_URL_DNS=true`）
-- **自定义 Base URL 规则**：客户端提供 base_url 时必须同时提供 api_key，不回退服务端凭证
+- **已知 Provider Base URL 规则**：客户端传入已知 provider 的默认 Base URL 时，允许继续回退到对应 `.env` Key
+- **自定义 Base URL 规则**：客户端提供未知自定义 base_url 时必须同时提供 api_key，不回退服务端凭证
 
 ---
 
@@ -246,9 +315,9 @@ KLING_BASE_URL=https://api.klingai.com               # 可选
 
 | 错误 | 原因 | 解决 |
 |------|------|------|
-| HTTP 400：图片生成 API Key 未配置 | 前端未填图片 Key 且 `.env` 无 `SILICONFLOW_API_KEY` | 填写 Key 或配置 `.env` |
+| HTTP 400：图片生成 API Key 未配置 | 前端未填图片 Key，且 `.env` 中对应图片服务商（如 `SILICONFLOW_IMAGE_API_KEY` / `DOUBAO_IMAGE_API_KEY`）也为空 | 填写 Key 或配置对应图片 `.env` |
 | HTTP 400：视频生成 API Key 未配置 | 视频 Key 缺失 | 填写对应 provider Key |
-| HTTP 400：自定义服务商必须同时提供 Key 和 Base URL | 只填了 base_url 未填 key | 两项都填 |
+| HTTP 400：使用自定义 Base URL 时必须同时提供 Key | 只填了未知自定义 base_url 未填 key | 两项都填 |
 | HTTP 401：Api key is invalid | Key 正确格式但服务商拒绝 | 确认 Key 与 Base URL 属于同一服务商 |
 | Kling 报错 "格式应为 access_key_id:secret_key" | Kling Key 未用冒号格式 | 检查 Key 格式 |
-| Mock 模式 400 | 发送了 LLM Provider Header 但 Key 为空 | 检查 `useMock` 是否正确屏蔽 LLM Headers |
+| 页面总是像 Mock | 是否误设了 `VITE_ENABLE_MOCK=true` | 关闭该环境变量并重启前端 |

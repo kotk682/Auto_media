@@ -359,8 +359,8 @@ ls -lh media/videos/
 
 1. **API Key 配置**：确保 `.env` 文件中配置了必要的 API Key
    - LLM: ANTHROPIC_API_KEY / OPENAI_API_KEY / etc.
-   - 图片: SILICONFLOW_API_KEY
-   - 视频: QWEN_API_KEY
+   - 图片: SILICONFLOW_IMAGE_API_KEY
+   - 视频: DASHSCOPE_VIDEO_API_KEY
 
 2. **FFmpeg 安装**：分离式策略需要 FFmpeg
    ```bash

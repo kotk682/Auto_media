@@ -760,6 +760,7 @@ async def generate_episode_scene_reference(
     model: str = DEFAULT_MODEL,
     image_api_key: str = "",
     image_base_url: str = "",
+    image_provider: str = "",
     art_style: str = "",
     existing_assets: Optional[list[Mapping[str, Any]]] = None,
 ) -> dict[str, Any]:
@@ -805,6 +806,7 @@ async def generate_episode_scene_reference(
                     model=effective_model,
                     image_api_key=image_api_key,
                     image_base_url=image_base_url,
+                    image_provider=image_provider,
                     negative_prompt=prompt_payload["negative_prompt"],
                     output_dir=EPISODE_DIR,
                     url_prefix="/media/episodes",
