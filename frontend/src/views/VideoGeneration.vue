@@ -61,14 +61,28 @@
               </div>
               <div v-if="getEpisodeReferenceGroups(ep.episode).length" class="episode-key-art-group-list">
                 <div
-                  v-for="group in getEpisodeReferenceGroups(ep.episode)"
-                  :key="group.environment_pack_key"
+                  v-if="getEpisodeReferenceGroups(ep.episode).length > 1"
+                  class="episode-key-art-group-tabs"
+                >
+                  <button
+                    v-for="(group, index) in getEpisodeReferenceGroups(ep.episode)"
+                    :key="getEpisodeReferenceGroupKey(group, index)"
+                    type="button"
+                    class="episode-key-art-group-tab"
+                    :class="{ active: getActiveEpisodeReferenceGroupKey(ep.episode) === getEpisodeReferenceGroupKey(group, index) }"
+                    @click.stop="setActiveEpisodeReferenceGroup(ep.episode, group, index)"
+                  >
+                    {{ group.group_label || `环境组 ${index + 1}` }}
+                  </button>
+                </div>
+                <div
+                  v-if="getActiveEpisodeReferenceGroup(ep.episode)"
                   class="episode-key-art-group"
                 >
                   <div class="episode-key-art-group-top">
-                    <div class="episode-key-art-group-title">{{ group.group_label || '环境组' }}</div>
+                    <div class="episode-key-art-group-title">{{ getActiveEpisodeReferenceGroup(ep.episode).group_label || '环境组' }}</div>
                     <div class="episode-key-art-group-copy">
-                      覆盖场景：{{ formatSceneNumbers(group.affected_scene_numbers) }} · {{ group.summary_environment || '主环境' }}
+                      覆盖场景：{{ formatSceneNumbers(getActiveEpisodeReferenceGroup(ep.episode).affected_scene_numbers) }} · {{ getActiveEpisodeReferenceGroup(ep.episode).summary_environment || '主环境' }}
                     </div>
                   </div>
                   <div class="episode-key-art-grid">
@@ -76,8 +90,8 @@
                       class="episode-key-art-card"
                     >
                       <img
-                        v-if="group.variants?.scene?.image_url"
-                        :src="getMediaUrl(group.variants.scene.image_url)"
+                        v-if="getActiveEpisodeReferenceGroup(ep.episode).variants?.scene?.image_url"
+                        :src="getMediaUrl(getActiveEpisodeReferenceGroup(ep.episode).variants.scene.image_url)"
                         class="episode-key-art-image"
                       />
                       <div v-else class="episode-key-art-placeholder">Scene Reference</div>
@@ -483,6 +497,7 @@ const manualPipelineId = ref(storyStore.manualPipelineId || '')
 const manualStoryId = ref(storyStore.manualStoryId || storyStore.storyId || '')
 const transitionLoadingMap = ref({})
 const episodeReferenceErrors = ref({})
+const activeEpisodeReferenceGroupKeys = ref({})
 
 const hasAnyVideo = computed(() => shots.value.some(s => s.video_url))
 const transitionResults = computed(() => {
@@ -738,6 +753,36 @@ function getEpisodeReferenceGroups(episode) {
   return storyStore.getEpisodeSceneReferenceGroups(episode)
 }
 
+function getEpisodeReferenceGroupKey(group, index = 0) {
+  if (group?.environment_pack_key) return group.environment_pack_key
+  if (group?.group_label) return `${group.group_label}-${index}`
+  return `group-${index + 1}`
+}
+
+function getActiveEpisodeReferenceGroupKey(episode) {
+  const groups = getEpisodeReferenceGroups(episode)
+  if (!groups.length) return ''
+
+  const selectedKey = activeEpisodeReferenceGroupKeys.value[episode]
+  const hasSelectedGroup = groups.some((group, index) => getEpisodeReferenceGroupKey(group, index) === selectedKey)
+  if (hasSelectedGroup) return selectedKey
+
+  return getEpisodeReferenceGroupKey(groups[0], 0)
+}
+
+function getActiveEpisodeReferenceGroup(episode) {
+  const groups = getEpisodeReferenceGroups(episode)
+  const activeKey = getActiveEpisodeReferenceGroupKey(episode)
+  return groups.find((group, index) => getEpisodeReferenceGroupKey(group, index) === activeKey) || null
+}
+
+function setActiveEpisodeReferenceGroup(episode, group, index = 0) {
+  activeEpisodeReferenceGroupKeys.value = {
+    ...activeEpisodeReferenceGroupKeys.value,
+    [episode]: getEpisodeReferenceGroupKey(group, index),
+  }
+}
+
 function getEpisodeReferenceStatus(episode) {
   return storyStore.getEpisodeSceneReferenceStatus(episode)
 }
@@ -781,6 +826,10 @@ async function generateEpisodeReference(episode) {
     const forceRegenerate = storyStore.getEpisodeSceneReferenceGroups(episode.episode).length > 0
     const result = await generateEpisodeSceneReference(storyStore.storyId, episode.episode, { forceRegenerate })
     storyStore.applyEpisodeSceneReferenceAsset(result)
+    const nextGroups = storyStore.getEpisodeSceneReferenceGroups(episode.episode)
+    if (nextGroups.length > 0) {
+      setActiveEpisodeReferenceGroup(episode.episode, nextGroups[0], 0)
+    }
     episodeReferenceErrors.value = {
       ...episodeReferenceErrors.value,
       [episode.episode]: '',
@@ -1659,4 +1708,3 @@ onMounted(async () => {
 </script>
 
 <style scoped src="../style/videogeneration.css"></style>
-
