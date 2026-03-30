@@ -96,6 +96,11 @@ async def generate_videos(
     generated_files = {
         "videos": {result["shot_id"]: result for result in results},
     }
+    invalidated_shot_ids = [
+        str(result.get("shot_id", "")).strip()
+        for result in results
+        if str(result.get("shot_id", "")).strip()
+    ]
     if body.story_id and story:
         try:
             await persist_storyboard_generation_state(
@@ -107,6 +112,9 @@ async def generate_videos(
                 generated_files=generated_files,
                 pipeline_id=effective_pipeline_id,
                 project_id=project_id,
+                prune_generated_files_to_shots=True,
+                invalidate_shot_ids=invalidated_shot_ids,
+                clear_final_video=True,
             )
         except Exception:
             logger.exception(
@@ -129,6 +137,9 @@ async def generate_videos(
                     pipeline_id=effective_pipeline_id,
                     story_id=pipeline_story_id,
                     generated_files=generated_files,
+                    prune_generated_files_to_shots=True,
+                    invalidate_shot_ids=invalidated_shot_ids,
+                    clear_final_video=True,
                 )
         except Exception:
             logger.exception(

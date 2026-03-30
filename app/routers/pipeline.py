@@ -1,5 +1,6 @@
 import logging
 import re
+from copy import deepcopy
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -38,10 +39,16 @@ from app.schemas.pipeline import (
 from app.schemas.storyboard import Storyboard
 from app.services import story_repository as repo
 from app.services.pipeline_executor import PipelineExecutor
-from app.services.storyboard_state import persist_storyboard_generation_state
+from app.services.storyboard_state import (
+    build_storyboard_timeline,
+    invalidate_generated_files_for_shots,
+    load_storyboard_generation_state,
+    persist_storyboard_generation_state,
+    prune_generated_files_to_storyboard,
+    serialize_shot_for_storage,
+)
 from app.services.story_context_service import prepare_story_context
 from app.services.storyboard import parse_script_to_storyboard
-from app.services.storyboard_state import load_storyboard_generation_state
 
 router = APIRouter(prefix="/api/v1/pipeline", tags=["pipeline"])
 logger = logging.getLogger(__name__)
@@ -77,6 +84,38 @@ def _normalize_optional_id(value: str | None) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _extract_storyboard_shots_from_generated_files(generated_files: dict | None) -> list[dict]:
+    if not isinstance(generated_files, dict):
+        return []
+    storyboard_payload = generated_files.get("storyboard")
+    storyboard_shots = storyboard_payload.get("shots") if isinstance(storyboard_payload, dict) else None
+    if not isinstance(storyboard_shots, list):
+        return []
+    return [serialize_shot_for_storage(shot) for shot in storyboard_shots]
+
+
+def _resolve_storyboard_shots_for_runtime(
+    pipeline_generated_files: dict | None,
+    stored_state: dict | None,
+) -> list[dict]:
+    stored_shots = stored_state.get("shots") if isinstance(stored_state, dict) else None
+    if isinstance(stored_shots, list) and stored_shots:
+        return [serialize_shot_for_storage(shot) for shot in stored_shots]
+
+    pipeline_storyboard_shots = _extract_storyboard_shots_from_generated_files(pipeline_generated_files)
+    if pipeline_storyboard_shots:
+        return pipeline_storyboard_shots
+
+    stored_generated_files = stored_state.get("generated_files") if isinstance(stored_state, dict) else None
+    stored_storyboard_shots = _extract_storyboard_shots_from_generated_files(
+        stored_generated_files if isinstance(stored_generated_files, dict) else None
+    )
+    if stored_storyboard_shots:
+        return stored_storyboard_shots
+
+    return []
 
 
 def _resolve_concat_video_local_path(video_url: str, base_url: str, video_dir: Path) -> str:
@@ -163,6 +202,12 @@ async def _persist_manual_pipeline_state(
     story_id: str,
     updates: dict,
     merge_generated_files: bool = False,
+    replace_generated_files: bool = False,
+    prune_generated_files_to_shots: bool = False,
+    shots: list[dict] | list | None = None,
+    invalidate_shot_ids: list[str] | None = None,
+    clear_videos_for_invalidated_shots: bool = False,
+    clear_final_video: bool = False,
 ) -> dict:
     pipeline = await _load_pipeline_record(
         db,
@@ -171,12 +216,48 @@ async def _persist_manual_pipeline_state(
         story_id=story_id,
     )
 
-    if merge_generated_files:
-        existing_generated_files = pipeline.get("generated_files")
-        new_generated_files = updates.get("generated_files")
-        if isinstance(existing_generated_files, dict) and isinstance(new_generated_files, dict):
-            merged_generated_files = _merge_generated_files(existing_generated_files, new_generated_files)
-            updates = {**updates, "generated_files": merged_generated_files}
+    existing_generated_files = pipeline.get("generated_files")
+    incoming_generated_files = updates.get("generated_files")
+    should_update_generated_files = (
+        replace_generated_files
+        or merge_generated_files
+        or incoming_generated_files is not None
+        or prune_generated_files_to_shots
+        or bool(invalidate_shot_ids)
+        or clear_final_video
+    )
+
+    if should_update_generated_files:
+        if replace_generated_files:
+            next_generated_files = deepcopy(dict(incoming_generated_files)) if isinstance(incoming_generated_files, dict) else {}
+        elif merge_generated_files:
+            next_generated_files = _merge_generated_files(existing_generated_files, incoming_generated_files)
+        elif incoming_generated_files is not None:
+            next_generated_files = deepcopy(dict(incoming_generated_files)) if isinstance(incoming_generated_files, dict) else incoming_generated_files
+        else:
+            next_generated_files = deepcopy(dict(existing_generated_files)) if isinstance(existing_generated_files, dict) else {}
+
+        authoritative_shots = [serialize_shot_for_storage(shot) for shot in shots or []]
+        if not authoritative_shots:
+            authoritative_shots = _extract_storyboard_shots_from_generated_files(
+                next_generated_files if isinstance(next_generated_files, dict) else None
+            )
+
+        if prune_generated_files_to_shots and authoritative_shots and isinstance(next_generated_files, dict):
+            next_generated_files = prune_generated_files_to_storyboard(next_generated_files, authoritative_shots)
+
+        if invalidate_shot_ids and isinstance(next_generated_files, dict):
+            next_generated_files = invalidate_generated_files_for_shots(
+                next_generated_files,
+                authoritative_shots,
+                invalidate_shot_ids,
+                clear_videos_for_invalidated_shots=clear_videos_for_invalidated_shots,
+                clear_final_video=clear_final_video,
+            )
+        elif clear_final_video and isinstance(next_generated_files, dict):
+            next_generated_files.pop("final_video_url", None)
+
+        updates = {**updates, "generated_files": next_generated_files}
 
     pipeline.update(updates)
 
@@ -286,22 +367,7 @@ def _merge_generated_files(existing: dict | None, incoming: dict | None) -> dict
 
 
 def _serialize_timeline(shots: list[dict], transitions: dict[str, dict] | None) -> list[dict]:
-    transition_map = transitions or {}
-    timeline: list[dict] = []
-    for index, shot in enumerate(shots):
-        shot_id = str(shot.get("shot_id", "")).strip()
-        if not shot_id:
-            continue
-        timeline.append({"item_type": "shot", "item_id": shot_id})
-        next_shot = shots[index + 1] if index + 1 < len(shots) else None
-        if not next_shot:
-            continue
-        next_shot_id = str(next_shot.get("shot_id", "")).strip()
-        transition_id = f"transition_{shot_id}__{next_shot_id}"
-        transition = transition_map.get(transition_id) or {}
-        if transition.get("video_url"):
-            timeline.append({"item_type": "transition", "item_id": transition_id})
-    return timeline
+    return build_storyboard_timeline(shots, transitions)
 
 
 def _url_from_local_media_path(path: str) -> str:
@@ -421,6 +487,60 @@ def _merge_negative_prompts(*prompts: str) -> str:
                 continue
             ordered.append(cleaned)
     return ", ".join(ordered)
+
+
+def _collect_export_sequence(
+    shots: list[dict],
+    generated_files: dict | None,
+) -> tuple[list[str], list[str], list[str]]:
+    videos_map = dict((generated_files or {}).get("videos") or {})
+    transitions_map = dict((generated_files or {}).get("transitions") or {})
+
+    ordered_video_urls: list[str] = []
+    missing_shot_videos: list[str] = []
+    missing_transitions: list[str] = []
+
+    for index, shot in enumerate(shots):
+        shot_id = str(shot.get("shot_id", "")).strip()
+        if not shot_id:
+            continue
+
+        video_entry = videos_map.get(shot_id) or {}
+        video_url = str(video_entry.get("video_url", "") or shot.get("video_url", "")).strip()
+        if video_url:
+            ordered_video_urls.append(video_url)
+        else:
+            missing_shot_videos.append(shot_id)
+
+        if index + 1 >= len(shots):
+            continue
+
+        next_shot_id = str(shots[index + 1].get("shot_id", "")).strip()
+        transition_id = f"transition_{shot_id}__{next_shot_id}"
+        transition_entry = transitions_map.get(transition_id) or {}
+        transition_url = str(transition_entry.get("video_url", "")).strip()
+        if transition_url:
+            ordered_video_urls.append(transition_url)
+        else:
+            missing_transitions.append(transition_id)
+
+    return ordered_video_urls, missing_shot_videos, missing_transitions
+
+
+def _build_export_incomplete_detail(
+    *,
+    missing_shot_videos: list[str],
+    missing_transitions: list[str],
+) -> str:
+    parts = []
+    if missing_shot_videos:
+        parts.append(f"缺少主镜头视频: {', '.join(missing_shot_videos)}")
+    if missing_transitions:
+        parts.append(f"缺少过渡视频: {', '.join(missing_transitions)}")
+    detail = "导出完整视频前，当前 storyboard 的核心分镜和相邻过渡分镜必须全部生成完成。"
+    if parts:
+        detail = f"{detail} {'；'.join(parts)}"
+    return detail
 
 
 @router.post("/{project_id}/auto-generate", response_model=AutoGenerateResponse)
@@ -613,6 +733,16 @@ async def generate_storyboard(
         )
         raise HTTPException(status_code=500, detail=f"Storyboard generation failed: {exc}") from exc
 
+    storyboard_generated_files = {
+        "storyboard": {
+            "shots": [_serialize_shot(shot) for shot in shots],
+            "usage": {
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+            },
+        },
+    }
+
     await repo.save_pipeline(
         db,
         pipeline_id,
@@ -620,15 +750,7 @@ async def generate_storyboard(
         {
             "progress": 30,
             "current_step": "Storyboard ready",
-            "generated_files": {
-                "storyboard": {
-                    "shots": [_serialize_shot(shot) for shot in shots],
-                    "usage": {
-                        "prompt_tokens": usage.get("prompt_tokens", 0),
-                        "completion_tokens": usage.get("completion_tokens", 0),
-                    },
-                },
-            },
+            "generated_files": storyboard_generated_files,
         },
     )
     if tracking_story_id and story:
@@ -642,8 +764,12 @@ async def generate_storyboard(
                 "prompt_tokens": usage.get("prompt_tokens", 0),
                 "completion_tokens": usage.get("completion_tokens", 0),
             },
+            generated_files=storyboard_generated_files,
             pipeline_id=pipeline_id,
             project_id=project_id,
+            replace_generated_files=True,
+            prune_generated_files_to_shots=True,
+            clear_final_video=True,
         )
 
     return Storyboard(
@@ -794,6 +920,10 @@ async def generate_assets(
             if generate_images:
                 completion_parts.append("images")
 
+            invalidated_shot_ids = []
+            if generate_images:
+                invalidated_shot_ids = [str(result["shot_id"]).strip() for result in image_results if str(result.get("shot_id", "")).strip()]
+
             await _persist_manual_pipeline_state(
                 db_session,
                 project_id=project_id,
@@ -808,6 +938,11 @@ async def generate_assets(
                     "generated_files": generated_files,
                 },
                 merge_generated_files=True,
+                shots=shots,
+                prune_generated_files_to_shots=True,
+                invalidate_shot_ids=invalidated_shot_ids,
+                clear_videos_for_invalidated_shots=generate_images,
+                clear_final_video=generate_images,
             )
             if resolved_story_id and story:
                 await _safe_persist_storyboard_generation_state(
@@ -820,6 +955,10 @@ async def generate_assets(
                     generated_files=generated_files,
                     pipeline_id=resolved_pipeline_id,
                     project_id=project_id,
+                    prune_generated_files_to_shots=True,
+                    invalidate_shot_ids=invalidated_shot_ids,
+                    clear_videos_for_invalidated_shots=generate_images,
+                    clear_final_video=generate_images,
                 )
         except Exception as exc:
             logger.exception(
@@ -945,6 +1084,11 @@ async def render_video(
                 art_style=art_style,
                 **video_config,
             )
+            invalidated_shot_ids = [
+                str(result["shot_id"]).strip()
+                for result in video_results
+                if str(result.get("shot_id", "")).strip()
+            ]
 
             await _persist_manual_pipeline_state(
                 db_session,
@@ -962,6 +1106,9 @@ async def render_video(
                     },
                 },
                 merge_generated_files=True,
+                prune_generated_files_to_shots=True,
+                invalidate_shot_ids=invalidated_shot_ids,
+                clear_final_video=True,
             )
             if resolved_story_id and story:
                 await _safe_persist_storyboard_generation_state(
@@ -976,6 +1123,9 @@ async def render_video(
                     },
                     pipeline_id=resolved_pipeline_id,
                     project_id=project_id,
+                    prune_generated_files_to_shots=True,
+                    invalidate_shot_ids=invalidated_shot_ids,
+                    clear_final_video=True,
                 )
         except Exception as exc:
             logger.exception(
@@ -1064,23 +1214,19 @@ async def generate_transition(
         or _normalize_optional_id(req.story_id)
         or project_id
     )
-    generated_files = dict(pipeline.get("generated_files") or {})
+    generated_files = deepcopy(dict(pipeline.get("generated_files") or {}))
 
     story = await repo.get_story(db, tracking_story_id) if tracking_story_id else None
     stored_state = load_storyboard_generation_state(story)
-    stored_generated_files = dict(stored_state.get("generated_files") or {})
-    storyboard_generation = stored_state.get("storyboard_generation")
-    if not isinstance(storyboard_generation, dict):
-        storyboard_generation = stored_state
-    storyboard_shots = storyboard_generation.get("shots") if isinstance(storyboard_generation, dict) else None
-    storyboard_payload = {}
-    if not isinstance(storyboard_shots, list) or not storyboard_shots:
-        storyboard_payload = generated_files.get("storyboard") or stored_generated_files.get("storyboard") or {}
-        storyboard_shots = storyboard_payload.get("shots") if isinstance(storyboard_payload, dict) else None
-    if not isinstance(storyboard_shots, list) or not storyboard_shots:
-        storyboard_shots = list(stored_state.get("shots") or [])
+    stored_generated_files = deepcopy(dict(stored_state.get("generated_files") or {}))
+    storyboard_shots = _resolve_storyboard_shots_for_runtime(generated_files, stored_state)
     if not storyboard_shots:
         raise HTTPException(status_code=400, detail="Storyboard shots are not available for this pipeline")
+
+    merged_runtime_generated_files = prune_generated_files_to_storyboard(
+        _merge_generated_files(stored_generated_files, generated_files),
+        storyboard_shots,
+    )
 
     shot_order = [str(shot.get("shot_id", "")).strip() for shot in storyboard_shots if str(shot.get("shot_id", "")).strip()]
     try:
@@ -1095,10 +1241,8 @@ async def generate_transition(
     from_shot = dict(storyboard_shots[from_index])
     to_shot = dict(storyboard_shots[to_index])
 
-    videos_map = dict(stored_generated_files.get("videos") or {})
-    videos_map.update(generated_files.get("videos") or {})
-    images_map = dict(stored_generated_files.get("images") or {})
-    images_map.update(generated_files.get("images") or {})
+    videos_map = dict(merged_runtime_generated_files.get("videos") or {})
+    images_map = dict(merged_runtime_generated_files.get("images") or {})
     from_video_entry = videos_map.get(req.from_shot_id) or {"video_url": from_shot.get("video_url", "")}
     to_video_entry = videos_map.get(req.to_shot_id) or {"video_url": to_shot.get("video_url", "")}
     from_image_entry = images_map.get(req.from_shot_id) or {"image_url": from_shot.get("image_url", "")}
@@ -1224,8 +1368,7 @@ async def generate_transition(
         },
     }
 
-    existing_transitions = dict(stored_generated_files.get("transitions") or {})
-    existing_transitions.update(generated_files.get("transitions") or {})
+    existing_transitions = dict(merged_runtime_generated_files.get("transitions") or {})
     existing_transitions[transition_id] = result
     timeline = _serialize_timeline([dict(shot) for shot in storyboard_shots], existing_transitions)
 
@@ -1241,6 +1384,9 @@ async def generate_transition(
             },
         },
         merge_generated_files=True,
+        shots=storyboard_shots,
+        prune_generated_files_to_shots=True,
+        clear_final_video=True,
     )
 
     persisted_story = await repo.get_story(db, tracking_story_id) if tracking_story_id else None
@@ -1256,6 +1402,8 @@ async def generate_transition(
             },
             pipeline_id=normalized_pipeline_id,
             project_id=project_id,
+            prune_generated_files_to_shots=True,
+            clear_final_video=True,
         )
 
     return TransitionResult(**result)
@@ -1302,15 +1450,53 @@ async def concat_videos(
 ):
     from app.services.ffmpeg import VIDEO_DIR, concat_videos as do_concat
 
-    if not req.video_urls:
-        raise HTTPException(status_code=400, detail="Video list is empty")
-
     normalized_pipeline_id = _normalize_optional_id(pipeline_id)
     tracking_story_id = resolve_tracking_story_id(project_id, _normalize_optional_id(story_id))
     base_url = str(request.base_url).rstrip("/")
-    local_paths = [_resolve_concat_video_local_path(url, base_url, VIDEO_DIR) for url in req.video_urls]
     output_path = str(VIDEO_DIR / f"episode_{project_id}.mp4")
     resolved_story_id = tracking_story_id
+    ordered_video_urls = list(req.video_urls or [])
+
+    if normalized_pipeline_id:
+        pipeline_record = await _load_pipeline_record(
+            db,
+            project_id=project_id,
+            pipeline_id=normalized_pipeline_id,
+            story_id=tracking_story_id,
+        )
+        resolved_story_id = _normalize_optional_id(pipeline_record.get("story_id")) or tracking_story_id
+        story = await repo.get_story(db, resolved_story_id) if resolved_story_id else None
+        stored_state = load_storyboard_generation_state(story)
+        storyboard_shots = _resolve_storyboard_shots_for_runtime(
+            pipeline_record.get("generated_files") if isinstance(pipeline_record.get("generated_files"), dict) else None,
+            stored_state,
+        )
+        if not storyboard_shots:
+            raise HTTPException(status_code=400, detail="当前 pipeline 缺少 storyboard，无法导出完整视频")
+
+        runtime_generated_files = prune_generated_files_to_storyboard(
+            _merge_generated_files(
+                stored_state.get("generated_files") if isinstance(stored_state, dict) else None,
+                pipeline_record.get("generated_files") if isinstance(pipeline_record.get("generated_files"), dict) else None,
+            ),
+            storyboard_shots,
+        )
+        ordered_video_urls, missing_shot_videos, missing_transitions = _collect_export_sequence(
+            storyboard_shots,
+            runtime_generated_files,
+        )
+        if missing_shot_videos or missing_transitions:
+            raise HTTPException(
+                status_code=400,
+                detail=_build_export_incomplete_detail(
+                    missing_shot_videos=missing_shot_videos,
+                    missing_transitions=missing_transitions,
+                ),
+            )
+    elif not ordered_video_urls:
+        raise HTTPException(status_code=400, detail="Video list is empty")
+
+    local_paths = [_resolve_concat_video_local_path(url, base_url, VIDEO_DIR) for url in ordered_video_urls]
 
     if normalized_pipeline_id:
         pipeline = await _persist_manual_pipeline_state(
@@ -1364,7 +1550,7 @@ async def concat_videos(
             )
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    video_url = f"/{output_path}"
+    video_url = _url_from_local_media_path(output_path)
 
     if normalized_pipeline_id:
         await _persist_manual_pipeline_state(

@@ -144,6 +144,8 @@
 - `generated_files`
 - `final_video_url`
 
+它的职责是恢复态与镜头级结果镜像，不替代 `Pipeline.generated_files` 的运行期真相源角色。
+
 ### 4.3 Pipeline
 
 `Pipeline` 是视频运行期状态真相源：
@@ -171,6 +173,12 @@
 | `meta` | 运行期策略说明，如 integrated fallback note |
 
 ---
+
+完整视频导出规则补充：
+
+- 只有当前 storyboard 的主镜头视频全部存在时，才允许进入导出。
+- 如果当前 storyboard 包含多个镜头，则相邻 `transition` 也必须全部存在。
+- 后端会按当前 storyboard 动态推导导出顺序，不再在 `pipeline_id` 存在时完全信任前端上送的 `video_urls`。
 
 ## 五、场景参考图与首帧主链路
 

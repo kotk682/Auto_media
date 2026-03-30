@@ -72,6 +72,11 @@ async def generate_images(
 
     async def _persist_generated_images(generated_files: dict) -> None:
         pipeline_story_id = str(body.story_id or "").strip()
+        invalidated_shot_ids = [
+            str(result.get("shot_id", "")).strip()
+            for result in (generated_files.get("images") or {}).values()
+            if str(result.get("shot_id", "")).strip()
+        ]
 
         if body.story_id and story:
             try:
@@ -84,6 +89,10 @@ async def generate_images(
                     generated_files=generated_files,
                     pipeline_id=effective_pipeline_id,
                     project_id=project_id,
+                    prune_generated_files_to_shots=True,
+                    invalidate_shot_ids=invalidated_shot_ids,
+                    clear_videos_for_invalidated_shots=True,
+                    clear_final_video=True,
                 )
             except Exception:
                 logger.exception(
@@ -108,6 +117,10 @@ async def generate_images(
                     pipeline_id=effective_pipeline_id,
                     story_id=pipeline_story_id,
                     generated_files=generated_files,
+                    prune_generated_files_to_shots=True,
+                    invalidate_shot_ids=invalidated_shot_ids,
+                    clear_videos_for_invalidated_shots=True,
+                    clear_final_video=True,
                 )
             else:
                 logger.warning(
