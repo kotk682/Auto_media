@@ -59,22 +59,22 @@
 - 当前 storyboard 是否已全部生成完毕
 - 是否混入了旧 transition / 旧 shot 视频
 
-## 建议改造方案
+## 实现方案
 
-## 一、把“当前 storyboard”设为唯一真源
+## 一、导出与校验的真相源
 
-建议以当前 `storyboard_generation.shots` 作为导出唯一真源，动态推导：
+当前代码按下面的优先级工作：
 
-- 当前有效 `shot_ids`
-- 当前应存在的 `transition_ids`
-- 当前完整导出的标准顺序
+1. 当前 storyboard 的镜头顺序，优先读取 `story.meta.storyboard_generation.shots`
+2. 运行期素材结果，优先读取 `pipeline.generated_files`
+3. story mirror 中的 `generated_files` 只作为恢复/兜底来源
+4. 真正参与 transition 与 concat 的资产，会先按“当前 storyboard 边界”裁剪后再使用
 
-建议新增几个辅助函数，放在 `app/routers/pipeline.py` 或 `app/services/storyboard_state.py`：
+也就是说：
 
-- `_collect_storyboard_shot_ids(shots) -> list[str]`
-- `_collect_expected_transition_ids(shots) -> list[str]`
-- `_prune_generated_files_to_storyboard(generated_files, shots) -> dict`
-- `_validate_export_readiness(shots, videos_map, transitions_map) -> dict`
+- `pipeline.generated_files` 仍是运行态主真相源
+- `storyboard_generation` 仍是恢复态镜像层
+- 但导出和过渡生成都会强制回到“当前 storyboard 合法边界”内工作，避免旧素材串入
 
 其中：
 
@@ -85,7 +85,7 @@
 
 ## 二、重新解析 storyboard 时清理旧素材
 
-建议在 `generate_storyboard()` 成功后，不再沿用旧的 story-level `generated_files`，而是显式重置为只保留当前 storyboard：
+现已在 `generate_storyboard()` 成功后显式重置 story mirror，只保留当前 storyboard：
 
 建议效果：
 
@@ -97,42 +97,30 @@
 - 清空旧 `final_video_url`
 - 只保留新的 `generated_files.storyboard`
 
-推荐做法有两种，优先选 A：
+实现方式：
 
-### 做法 A：给 storyboard state 增加 replace/prune 能力
-
-在 `app/services/storyboard_state.py` 增加类似参数：
-
-- `replace_generated_files: bool = False`
-- 或 `prune_to_shots: bool = False`
-
-在 `generate_storyboard()` 调用 `persist_storyboard_generation_state(...)` 时启用它。
-
-这样新 storyboard 写入后，story meta 中只保留这次解析对应的资产空间。
-
-### 做法 B：在生成 storyboard 后手工构造干净状态
-
-直接在 `generate_storyboard()` 写入：
-
-- `shots`
-- `usage`
-- `pipeline_id`
-- `project_id`
-- `story_id`
-- `generated_files = {"storyboard": {...}}`
-- `final_video_url = ""`
-
-不沿用旧的 `generated_files` merge。
+- `persist_storyboard_generation_state(...)` 现支持 `replace_generated_files`
+- 重新解析分镜时会用新的 `generated_files.storyboard` 替换旧镜像
+- 同时清空 story mirror 上的 `final_video_url`
 
 ## 三、所有 generated_files 在持久化时按当前 shot 集裁剪
 
-无论是单镜头接口还是批量接口，建议在落库前统一裁剪：
+现已统一按“当前完整 storyboard 的合法资产边界”裁剪，而不是按单次请求 body 的 shots 裁剪。
+
+当前行为：
 
 - `tts/images/videos` 只保留当前 `shot_ids`
 - `transitions` 只保留当前相邻镜头的 transition
 - `timeline` 只保留当前 storyboard 可推导出的时间线
+- 单镜头重生图后，会额外失效：
+  - 该镜头旧 `video`
+  - 所有关联 `transition`
+  - `final_video_url`
+- 单镜头/批量重生视频后，会额外失效：
+  - 所有关联 `transition`
+  - `final_video_url`
 
-推荐修改点：
+落点：
 
 - `app/services/storyboard_state.py`
   - `build_storyboard_generation_state`
@@ -140,18 +128,18 @@
 - `app/routers/pipeline.py`
   - `_persist_manual_pipeline_state`
 
-重点不是“追加更多 merge 规则”，而是“每次落库时先知道当前 storyboard 的合法边界，再裁剪非法旧条目”。
+重点不是“继续叠加 merge”，而是“每次写入前先回到当前 storyboard 的合法边界，再处理增量结果和依赖失效”。
 
 ## 四、导出前必须做完整性校验
 
-建议把“是否允许导出”定义成统一规则：
+当前已实现为统一规则：
 
 ### 可导出条件
 
 1. 当前 storyboard 至少有 1 个核心分镜
 2. 每个核心分镜都存在 `video_url`
 3. 如果核心分镜数量大于 1，则每一对相邻分镜都存在对应的 transition `video_url`
-4. `timeline` 必须和当前 storyboard 一一对应
+4. 导出顺序必须能由当前 storyboard 动态推导出来
 5. `final_video_url` 不能作为“允许再次导出”的依据，它只是上一次结果，不代表本次素材完整
 
 ### 不可导出场景
@@ -163,7 +151,7 @@
 
 ## 五、把导出顺序放到后端生成，不再完全信任前端 URL 列表
 
-推荐升级 `concat_videos()`：
+当前 `concat_videos()` 已升级为：
 
 1. 当提供 `pipeline_id` 时，后端自行读取当前 pipeline/storyboard 状态
 2. 后端根据当前 `shots` 生成预期顺序：
@@ -172,29 +160,30 @@
    - `shot-2`
    - `transition_shot-2__shot-3`
    - `shot-3`
-3. 校验全部素材齐全后，再拼出最终 `orderedVideoUrls`
-4. 忽略或弱化前端传入的 `req.video_urls`
+3. 先校验主镜头视频和过渡视频是否齐全
+4. 校验通过后再拼出最终 `orderedVideoUrls`
+5. 当存在 `pipeline_id` 时，不再信任前端传入的 `req.video_urls`
 
 这样可以避免两类问题：
 
 1. 前端误把旧素材 URL 带进来
 2. 用户刷新后本地状态滞后，仍能导出错误顺序
 
-如果要保持兼容，可以这样处理：
+兼容策略：
 
 - 旧模式：无 `pipeline_id` 时沿用 `req.video_urls`
 - 新模式：有 `pipeline_id` 时以后端推导顺序为准
 
 ## 六、前端按钮也要同步禁用
 
-建议在 `frontend/src/views/VideoGeneration.vue` 增加一个 `exportReadiness` 计算属性，统一返回：
+当前前端已在 `frontend/src/views/VideoGeneration.vue` 增加 `exportReadiness` 计算属性，统一返回：
 
 - `ready: boolean`
 - `missingShotVideos: string[]`
 - `missingTransitions: string[]`
 - `message: string`
 
-逻辑建议：
+当前逻辑：
 
 1. 从当前 `shots` 推导 `expectedTransitions`
 2. 用当前 `transitionResults` 和 `shots[*].video_url` 校验完整性
@@ -208,7 +197,7 @@
 - `还有 1 个过渡分镜未生成：transition_scene1_shot2__scene1_shot3`
 - `当前只解析了部分场景，禁止复用旧素材导出`
 
-注意：前端禁用只是交互层保护，真正兜底必须在后端。
+前端禁用只是交互层保护，真正兜底仍在后端 `concat`。
 
 ## 推荐修改文件
 
@@ -296,12 +285,20 @@
 3. 后端即使收到错误的 `video_urls`，也不会导出不属于当前 storyboard 的素材。
 4. 刷新页面、恢复历史状态后，导出判断仍与后端一致。
 
-## 本次已完成
+## 当前已完成
 
-本次实际已先落地一个临时前端变更：
+本次已落地：
 
 - `frontend/src/views/VideoGeneration.vue`
   - 已隐藏“生成语音”相关前端入口
   - 已停止页面初始化时加载语音列表
-
-上面这份文档对应的是下一步“完整视频导出防串片”的改造说明，尚未在代码中完全实现。
+  - 已在前端禁用未满足完整性条件的“导出完整视频”按钮
+- `app/services/storyboard_state.py`
+  - 已增加 storyboard 边界裁剪与依赖失效逻辑
+- `app/routers/pipeline.py`
+  - 已在导出前按当前 storyboard 做完整性校验
+  - 已在提供 `pipeline_id` 时改为后端推导导出顺序
+- `app/routers/image.py`
+  - 单镜头生图后会失效相关视频、过渡和成片
+- `app/routers/video.py`
+  - 单镜头生视频后会失效相关过渡和成片

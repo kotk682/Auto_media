@@ -590,6 +590,107 @@ class ParseStoryboardOverrideTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(shots), 1)
         self.assertEqual(shots[0].source_scene_key, "ep01_scene07")
 
+    async def test_parse_script_to_storyboard_normalizes_camera_angle_variants(self):
+        response = """
+        [
+          {
+            "shot_id": "scene1_shot1",
+            "storyboard_description": "李明站在楼梯上方向下看。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Slightly high angle", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "李明，深色外套",
+              "action_and_expression": "停下脚步，低头看向楼下",
+              "environment_and_props": "木质楼梯与走廊扶手",
+              "lighting_and_color": "室内暖光与走廊阴影"
+            },
+            "image_prompt": "Medium shot. Li Ming pauses on the staircase and looks downward.",
+            "final_video_prompt": "Medium shot. Static camera. Li Ming pauses on the staircase and looks down the hallway."
+          }
+        ]
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            shots, _ = await parse_script_to_storyboard(
+                "【环境】走廊楼梯\n【画面】李明停在楼梯上方向下看。",
+                provider="openai",
+            )
+
+        self.assertEqual(len(shots), 1)
+        self.assertEqual(shots[0].camera_setup.camera_angle, "High angle")
+
+    async def test_parse_script_to_storyboard_tolerates_minor_schema_drift(self):
+        response = """
+        {
+          "shots": [
+            {
+              "shot_id": "scene1_shot1",
+              "storyboard_description": "李明在走廊尽头停住，抬头观察二楼窗户。",
+              "scene_intensity": "medium",
+              "scene_position": "opening",
+              "camera_setup": {
+                "shot_size": "Medium shot",
+                "camera_angle": "Slightly high angle",
+                "movement": "Push in"
+              },
+              "visual_elements": {
+                "subject_and_clothing": "李明，深色外套",
+                "action_and_expression": "停步抬头观察",
+                "environment_and_props": "老旧走廊、木栏杆、二楼窗户",
+                "lighting_and_color": "昏黄顶灯与窗边冷光"
+              },
+              "audio_reference": {
+                "type": "voiceover",
+                "content": "他意识到有人在楼上看着自己。"
+              },
+              "final_video_prompt": ""
+            }
+          ]
+        }
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            shots, _ = await parse_script_to_storyboard(
+                "【环境】旧楼走廊\n【画面】李明在走廊尽头停下，抬头看向二楼。",
+                provider="openai",
+            )
+
+        self.assertEqual(len(shots), 1)
+        self.assertEqual(shots[0].camera_setup.shot_size, "MS")
+        self.assertEqual(shots[0].camera_setup.camera_angle, "High angle")
+        self.assertEqual(shots[0].camera_setup.movement, "Slow Dolly in")
+        self.assertEqual(shots[0].scene_intensity, "low")
+        self.assertEqual(shots[0].scene_position, "establishing")
+        self.assertEqual(shots[0].audio_reference.type, "narration")
+        self.assertTrue(shots[0].image_prompt)
+        self.assertTrue(shots[0].final_video_prompt)
+
+    async def test_parse_script_to_storyboard_rejects_non_shot_wrapper_object(self):
+        response = """
+        {
+          "message": "temporary failure",
+          "request_id": "req_123"
+        }
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            with self.assertRaises(ValueError):
+                await parse_script_to_storyboard(
+                    "【环境】旧楼走廊\n【画面】李明在走廊尽头停下。",
+                    provider="openai",
+                )
+
 
 class StoryContextPreparationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

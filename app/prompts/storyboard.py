@@ -204,6 +204,7 @@ Each shot has a `scene_intensity` field ("low" or "high") inherited from the scr
 **Shot Size**: Extreme Close-up (ECU), Close-up (CU), Medium Close-up (MCU), Medium Shot (MS), Medium Wide Shot (MWS), Wide Shot (WS), Extreme Wide Shot (EWS), Over-the-shoulder (OTS)
 
 **Camera Angle**: Eye-level, Low angle, High angle, Dutch angle, Bird's eye, Worm's eye
+- Use one of the six camera angle values exactly, with no modifiers or variants like "slightly high angle" or "slight low angle"
 
 **Camera Movement**: Static, Slow Dolly in, Dolly out, Pan left, Pan right, Tilt up, Tilt down, Tracking shot, Handheld subtle shake, Crane up, Crane down
 

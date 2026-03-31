@@ -1,8 +1,10 @@
 import json
 import logging
 import re
-from typing import List, Optional
+from collections.abc import Mapping
+from typing import Any, List, Optional
 
+from pydantic import ValidationError
 from app.services.llm.factory import get_llm_provider
 from app.schemas.storyboard import Shot
 from app.prompts.storyboard import SYSTEM_PROMPT, USER_TEMPLATE
@@ -124,6 +126,30 @@ _MOVEMENT_LABELS_ZH = {
     "Crane up": "升降上移",
     "Crane down": "升降下移",
 }
+_CANONICAL_CAMERA_ANGLES = (
+    "Eye-level",
+    "Low angle",
+    "High angle",
+    "Dutch angle",
+    "Bird's eye",
+    "Worm's eye",
+)
+_CANONICAL_SHOT_SIZES = (
+    "EWS",
+    "WS",
+    "MWS",
+    "MS",
+    "MCU",
+    "CU",
+    "ECU",
+    "OTS",
+)
+_CANONICAL_SCENE_POSITIONS = (
+    "establishing",
+    "development",
+    "climax",
+    "resolution",
+)
 _CANONICAL_CAMERA_MOVEMENTS = (
     "Static",
     "Slow Dolly in",
@@ -201,6 +227,309 @@ def _normalize_camera_movement(value: str) -> str:
         return "Crane down" if ("down" in normalized or "下" in normalized) else "Crane up"
 
     return "Static"
+
+
+def _normalize_camera_angle(value: str) -> str:
+    text = _collapse_spaces(value)
+    if not text:
+        return "Eye-level"
+
+    for angle in _CANONICAL_CAMERA_ANGLES:
+        if text.lower() == angle.lower():
+            return angle
+
+    normalized = re.sub(r"[_/|]", " ", text.lower())
+    normalized = re.sub(r"\s*\+\s*", " ", normalized)
+    normalized = re.sub(r"[(),.;:]+", " ", normalized)
+    normalized = _collapse_spaces(normalized)
+
+    alias_groups = (
+        ("Bird's eye", ("birds eye", "bird eye", "bird s eye", "bird's eye", "overhead", "top down", "top-down", "aerial view", "俯视", "鸟瞰", "上帝视角")),
+        ("Worm's eye", ("worms eye", "worm eye", "worm s eye", "worm's eye", "extreme low angle", "ground level up", "ground-level up", "仰视", "虫视角")),
+        ("Dutch angle", ("dutch angle", "canted angle", "tilted angle", "slanted angle", "倾斜角度", "斜角", "倾斜镜头")),
+        ("High angle", ("high angle", "slightly high angle", "mild high angle", "subtle high angle", "downward angle", "slight downward angle", "高角度", "高机位", "高视角", "俯角")),
+        ("Low angle", ("low angle", "slightly low angle", "mild low angle", "subtle low angle", "upward angle", "slight upward angle", "低角度", "低机位", "低视角", "仰角")),
+        ("Eye-level", ("eye level", "eye-level", "neutral angle", "straight on", "straight-on", "level angle", "平视", "视平", "正视")),
+    )
+
+    for canonical, aliases in alias_groups:
+        if any(alias in normalized for alias in aliases):
+            return canonical
+
+    if "overhead" in normalized or "top down" in normalized or "top-down" in normalized:
+        return "Bird's eye"
+    if "high" in normalized or "俯" in normalized:
+        return "High angle"
+    if "low" in normalized or "仰" in normalized:
+        return "Low angle"
+    if "tilt" in normalized or "canted" in normalized or "斜" in normalized:
+        return "Dutch angle"
+
+    return "Eye-level"
+
+
+def _normalize_shot_size(value: str) -> str:
+    text = _collapse_spaces(value)
+    if not text:
+        return "MS"
+
+    for shot_size in _CANONICAL_SHOT_SIZES:
+        if text.upper() == shot_size:
+            return shot_size
+
+    normalized = re.sub(r"[_/|]", " ", text.lower())
+    normalized = re.sub(r"[(),.;:]+", " ", normalized)
+    normalized = _collapse_spaces(normalized)
+
+    alias_groups = (
+        ("EWS", ("extreme wide shot", "extreme wide", "超远景", "极远景", "大全景")),
+        ("ECU", ("extreme close up", "extreme close-up", "特特写", "极近特写")),
+        ("MCU", ("medium close up", "medium close-up", "中近景", "近中景")),
+        ("MWS", ("medium wide shot", "medium wide", "中远景")),
+        ("OTS", ("over the shoulder", "over-the-shoulder", "越肩", "肩后")),
+        ("WS", ("wide shot", "wide", "远景", "全景")),
+        ("CU", ("close up", "close-up", "close shot", "近景", "特写")),
+        ("MS", ("medium shot", "medium", "中景")),
+    )
+
+    for canonical, aliases in alias_groups:
+        if any(alias in normalized for alias in aliases):
+            return canonical
+
+    return "MS"
+
+
+def _normalize_scene_intensity(value: str) -> str:
+    normalized = _collapse_spaces(value).lower()
+    if normalized in {"high", "高潮", "高", "intense", "climax", "peak"}:
+        return "high"
+    return "low"
+
+
+def _normalize_scene_position(value: str) -> str | None:
+    normalized = _collapse_spaces(value).lower()
+    if not normalized:
+        return None
+
+    for position in _CANONICAL_SCENE_POSITIONS:
+        if normalized == position:
+            return position
+
+    alias_groups = (
+        ("establishing", ("opening", "opener", "establishing", "intro", "start", "开场", "建立")),
+        ("development", ("development", "middle", "buildup", "progression", "发展", "中段")),
+        ("climax", ("climax", "peak", "turning point", "高潮", "爆发")),
+        ("resolution", ("resolution", "ending", "closing", "outro", "结尾", "收束")),
+    )
+    for canonical, aliases in alias_groups:
+        if any(alias in normalized for alias in aliases):
+            return canonical
+    return None
+
+
+def _stringify_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def _coerce_estimated_duration(value: Any) -> int:
+    try:
+        duration = int(value)
+    except (TypeError, ValueError):
+        return 4
+    return max(1, min(duration, 10))
+
+
+def _normalize_audio_reference(value: Any, legacy_dialogue: Any = None) -> dict[str, Any] | None:
+    if isinstance(value, Mapping):
+        content = _stringify_text(value.get("content"))
+        raw_type = _collapse_spaces(value.get("type")).lower()
+        if raw_type in {"dialogue", "dialog", "speech", "spoken"}:
+            ref_type = "dialogue"
+        elif raw_type in {"narration", "voiceover", "voice over", "voice-over", "narrator"}:
+            ref_type = "narration"
+        elif raw_type in {"sfx", "sound effect", "sound-effect", "fx"}:
+            ref_type = "sfx"
+        else:
+            ref_type = "dialogue" if content and legacy_dialogue else None
+        return {"type": ref_type, "content": content or None} if (ref_type or content) else None
+
+    dialogue = _stringify_text(legacy_dialogue)
+    if dialogue:
+        return {"type": "dialogue", "content": dialogue}
+    return None
+
+
+def _fallback_storyboard_description(item: Mapping[str, Any], shot_number: int) -> str:
+    for candidate in (
+        item.get("storyboard_description"),
+        item.get("image_prompt"),
+        item.get("final_video_prompt"),
+        item.get("visual_description_zh"),
+        ((item.get("visual_elements") or {}) if isinstance(item.get("visual_elements"), Mapping) else {}).get("action_and_expression"),
+        ((item.get("visual_elements") or {}) if isinstance(item.get("visual_elements"), Mapping) else {}).get("environment_and_props"),
+    ):
+        text = _stringify_text(candidate)
+        if text:
+            return text
+    return f"镜头{shot_number}画面。"
+
+
+def _build_shot_id(raw_shot_id: Any, shot_number: int) -> str:
+    shot_id = _stringify_text(raw_shot_id)
+    return shot_id or f"scene{shot_number}_shot1"
+
+
+def _normalize_shot_item(
+    raw_item: Any,
+    *,
+    shot_number: int,
+    scene_mapping: Optional[dict[int, str]] = None,
+) -> dict[str, Any]:
+    item = dict(raw_item) if isinstance(raw_item, Mapping) else {"storyboard_description": _stringify_text(raw_item)}
+
+    if "visual_prompt" in item and "final_video_prompt" not in item:
+        item["final_video_prompt"] = item.get("visual_prompt")
+    if "visual_description_zh" in item and "storyboard_description" not in item:
+        item["storyboard_description"] = item.get("visual_description_zh")
+
+    camera_setup_raw = item.get("camera_setup") if isinstance(item.get("camera_setup"), Mapping) else {}
+    legacy_movement = item.get("camera_motion")
+    shot_size = _normalize_shot_size(camera_setup_raw.get("shot_size") or item.get("shot_size"))
+    camera_angle = _normalize_camera_angle(camera_setup_raw.get("camera_angle") or "Eye-level")
+    movement = _normalize_camera_movement(camera_setup_raw.get("movement") or legacy_movement or "Static")
+
+    visual_elements_raw = item.get("visual_elements") if isinstance(item.get("visual_elements"), Mapping) else {}
+    visual_elements = {
+        "subject_and_clothing": _stringify_text(visual_elements_raw.get("subject_and_clothing")),
+        "action_and_expression": _stringify_text(visual_elements_raw.get("action_and_expression")),
+        "environment_and_props": _stringify_text(visual_elements_raw.get("environment_and_props")),
+        "lighting_and_color": _stringify_text(visual_elements_raw.get("lighting_and_color")),
+    }
+
+    storyboard_description = _stringify_text(item.get("storyboard_description")) or _fallback_storyboard_description(item, shot_number)
+    image_prompt = _stringify_text(item.get("image_prompt"))
+    final_video_prompt = _stringify_text(item.get("final_video_prompt"))
+    if not image_prompt and not final_video_prompt and not any(visual_elements.values()):
+        image_prompt = storyboard_description
+        final_video_prompt = storyboard_description
+
+    shot_id = _build_shot_id(item.get("shot_id"), shot_number)
+    shot_scene_index = _extract_scene_index_from_shot_id(shot_id)
+    source_scene_key = _stringify_text(item.get("source_scene_key"))
+    if shot_scene_index is not None:
+        mapped_scene_key = (scene_mapping or {}).get(shot_scene_index)
+        source_scene_key = mapped_scene_key or source_scene_key or f"scene{shot_scene_index}"
+
+    audio_reference = _normalize_audio_reference(item.get("audio_reference"), legacy_dialogue=item.get("dialogue"))
+
+    normalized = {
+        "shot_id": shot_id,
+        "source_scene_key": source_scene_key or None,
+        "estimated_duration": _coerce_estimated_duration(item.get("estimated_duration", 4)),
+        "scene_intensity": _normalize_scene_intensity(item.get("scene_intensity", "low")),
+        "storyboard_description": storyboard_description,
+        "camera_setup": {
+            "shot_size": shot_size,
+            "camera_angle": camera_angle,
+            "movement": movement,
+        },
+        "visual_elements": visual_elements,
+        "image_prompt": image_prompt or None,
+        "final_video_prompt": final_video_prompt,
+        "last_frame_prompt": None,
+        "audio_reference": audio_reference,
+        "mood": _stringify_text(item.get("mood")) or None,
+        "scene_position": _normalize_scene_position(item.get("scene_position")),
+        "transition_from_previous": _stringify_text(item.get("transition_from_previous")) or None,
+        "last_frame_url": None,
+    }
+    return normalized
+
+
+def _build_minimal_valid_shot_item(
+    item: Mapping[str, Any],
+    *,
+    shot_number: int,
+    scene_mapping: Optional[dict[int, str]] = None,
+) -> dict[str, Any]:
+    fallback_description = _fallback_storyboard_description(item, shot_number)
+    shot_id = _build_shot_id(item.get("shot_id"), shot_number)
+    shot_scene_index = _extract_scene_index_from_shot_id(shot_id)
+    mapped_scene_key = (scene_mapping or {}).get(shot_scene_index) if shot_scene_index is not None else None
+
+    return {
+        "shot_id": shot_id,
+        "source_scene_key": mapped_scene_key or _stringify_text(item.get("source_scene_key")) or None,
+        "estimated_duration": 4,
+        "scene_intensity": "low",
+        "storyboard_description": fallback_description,
+        "camera_setup": {
+            "shot_size": "MS",
+            "camera_angle": "Eye-level",
+            "movement": "Static",
+        },
+        "visual_elements": {
+            "subject_and_clothing": "",
+            "action_and_expression": "",
+            "environment_and_props": "",
+            "lighting_and_color": "",
+        },
+        "image_prompt": _stringify_text(item.get("image_prompt")) or fallback_description,
+        "final_video_prompt": _stringify_text(item.get("final_video_prompt")) or _stringify_text(item.get("image_prompt")) or fallback_description,
+        "last_frame_prompt": None,
+        "audio_reference": _normalize_audio_reference(item.get("audio_reference"), legacy_dialogue=item.get("dialogue")),
+        "mood": _stringify_text(item.get("mood")) or None,
+        "scene_position": None,
+        "transition_from_previous": _stringify_text(item.get("transition_from_previous")) or None,
+        "last_frame_url": None,
+    }
+
+
+def _load_storyboard_items(raw: str) -> list[Any]:
+    cleaned = re.sub(r"```(?:json)?|```", "", raw).strip()
+    candidates = [cleaned]
+
+    array_start, array_end = cleaned.find("["), cleaned.rfind("]")
+    if array_start != -1 and array_end > array_start:
+        candidates.append(cleaned[array_start:array_end + 1])
+
+    object_start, object_end = cleaned.find("{"), cleaned.rfind("}")
+    if object_start != -1 and object_end > object_start:
+        candidates.append(cleaned[object_start:object_end + 1])
+
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+            if isinstance(payload, list):
+                return payload
+            if isinstance(payload, Mapping):
+                shots = payload.get("shots")
+                if isinstance(shots, list):
+                    return shots
+                if any(
+                    key in payload
+                    for key in (
+                        "shot_id",
+                        "storyboard_description",
+                        "camera_setup",
+                        "visual_elements",
+                        "image_prompt",
+                        "final_video_prompt",
+                    )
+                ):
+                    return [payload]
+                raise ValueError("Storyboard response object does not contain shot fields")
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+
+    if last_error:
+        raise last_error
+    raise ValueError("Storyboard response is not a valid JSON array or object")
 
 
 def _strip_patterns(text: str, patterns: tuple[str, ...]) -> str:
@@ -569,73 +898,34 @@ def _build_scene_mapping_section(script: str) -> str:
 
 def _parse_shots(raw: str, *, scene_mapping: Optional[dict[int, str]] = None) -> List[Shot]:
     """解析 LLM 输出为 Shot 列表，兼容新旧两种 JSON 格式。"""
-    cleaned = re.sub(r"```(?:json)?|```", "", raw).strip()
-    data = json.loads(cleaned)
+    data = _load_storyboard_items(raw)
     shots = []
-    for item in data:
-        # 旧格式兼容：将扁平字段映射到新嵌套结构
-        if "visual_prompt" in item and "final_video_prompt" not in item:
-            item["final_video_prompt"] = item.pop("visual_prompt")
-        if "visual_description_zh" in item and "storyboard_description" not in item:
-            item["storyboard_description"] = item.pop("visual_description_zh")
-        if "camera_motion" in item and "camera_setup" not in item:
-            item["camera_setup"] = {
-                "shot_size": item.pop("shot_size", "MS"),
-                "camera_angle": "Eye-level",
-                "movement": item.pop("camera_motion"),
-            }
-        elif "camera_setup" not in item:
-            item["camera_setup"] = {
-                "shot_size": item.pop("shot_size", "MS"),
-                "camera_angle": "Eye-level",
-                "movement": "Static",
-            }
-        else:
-            # Partial nested dict: fill missing subfields so Pydantic validation passes
-            cs = item["camera_setup"]
-            cs.setdefault("shot_size", item.pop("shot_size", "MS"))
-            cs.setdefault("camera_angle", "Eye-level")
-            cs.setdefault("movement", "Static")
-        item["camera_setup"]["movement"] = _normalize_camera_movement(item["camera_setup"].get("movement", "Static"))
-        if "dialogue" in item and "audio_reference" not in item:
-            dlg = item.pop("dialogue")
-            item["audio_reference"] = {
-                "type": "dialogue" if dlg else None,
-                "content": dlg,
-            }
-        elif item.get("audio_reference") is None:
-            # Consume legacy dialogue key even when audio_reference key exists but is null
-            dlg = item.pop("dialogue", None)
-            if dlg:
-                item["audio_reference"] = {"type": "dialogue", "content": dlg}
-        if "visual_elements" not in item:
-            item["visual_elements"] = {
-                "subject_and_clothing": "",
-                "action_and_expression": "",
-                "environment_and_props": "",
-                "lighting_and_color": "",
-            }
-        else:
-            # Partial nested dict: fill missing subfields
-            ve = item["visual_elements"]
-            ve.setdefault("subject_and_clothing", "")
-            ve.setdefault("action_and_expression", "")
-            ve.setdefault("environment_and_props", "")
-            ve.setdefault("lighting_and_color", "")
-        if "scene_intensity" not in item:
-            item["scene_intensity"] = "low"
-        shot_scene_index = _extract_scene_index_from_shot_id(str(item.get("shot_id", "")))
-        if shot_scene_index is not None:
-            mapped_scene_key = (scene_mapping or {}).get(shot_scene_index)
-            if mapped_scene_key:
-                item["source_scene_key"] = mapped_scene_key
-            elif "source_scene_key" not in item or not _collapse_spaces(item.get("source_scene_key", "")):
-                item["source_scene_key"] = f"scene{shot_scene_index}"
-        # 清理旧格式残留的顶层字段，避免 Pydantic 报错
-        for old_key in ("shot_size", "camera_motion", "dialogue",
-                        "visual_prompt", "visual_description_zh"):
-            item.pop(old_key, None)
-        shots.append(_postprocess_shot(Shot(**item)))
+    for shot_number, raw_item in enumerate(data, start=1):
+        item = _normalize_shot_item(raw_item, shot_number=shot_number, scene_mapping=scene_mapping)
+        try:
+            shots.append(_postprocess_shot(Shot(**item)))
+            continue
+        except (ValidationError, ValueError, TypeError) as exc:
+            logger.warning(
+                "Storyboard shot fallback triggered shot_number=%s shot_id=%s error=%s",
+                shot_number,
+                item.get("shot_id", ""),
+                exc,
+            )
+
+        fallback_item = _build_minimal_valid_shot_item(item, shot_number=shot_number, scene_mapping=scene_mapping)
+        try:
+            shots.append(_postprocess_shot(Shot(**fallback_item)))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Storyboard shot dropped after fallback shot_number=%s shot_id=%s error=%s",
+                shot_number,
+                fallback_item.get("shot_id", ""),
+                exc,
+            )
+
+    if not shots:
+        raise ValueError("分镜解析失败：没有可用镜头")
     return shots
 
 
