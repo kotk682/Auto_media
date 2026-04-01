@@ -394,6 +394,25 @@ class PipelineRuntimeHelperTests(unittest.TestCase):
         self.assertIn("dark blue robe", prompt)
 
 
+class PipelineExecutorPersistenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_snapshot_persistence_rolls_back_failed_session(self):
+        db = AsyncMock()
+        executor = PipelineExecutor("project-1", "pipeline-1", db, story_id="story-1")
+
+        with (
+            patch("app.services.pipeline_executor.repo.get_story", new=AsyncMock(return_value={"id": "story-1"})),
+            patch(
+                "app.services.pipeline_executor.persist_storyboard_generation_state",
+                new=AsyncMock(side_effect=RuntimeError("boom")),
+            ),
+            patch("app.services.pipeline_executor.logger.exception") as logger_exception,
+        ):
+            await executor._persist_storyboard_generation_snapshot({"meta": {}})
+
+        db.rollback.assert_awaited_once()
+        logger_exception.assert_called_once()
+
+
 class PipelineExecutorStateResetTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_full_pipeline_resets_previous_shots_and_results(self):
         executor = PipelineExecutor("project-1", "pipeline-1", None, story_id="story-1")

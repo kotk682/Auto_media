@@ -1,3 +1,5 @@
+# ruff: noqa: RUF001
+
 import asyncio
 import uuid
 from typing import AsyncGenerator, Optional

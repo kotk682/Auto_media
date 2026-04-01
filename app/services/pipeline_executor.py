@@ -113,6 +113,15 @@ class PipelineExecutor:
                 clear_final_video=True,
             )
         except Exception:
+            try:
+                await self.db.rollback()
+            except Exception:
+                logger.exception(
+                    "Auto pipeline storyboard persistence rollback failed project=%s pipeline_id=%s story_id=%s",
+                    self.project_id,
+                    self.pipeline_id,
+                    self.story_id,
+                )
             logger.exception(
                 "Auto pipeline storyboard persistence failed project=%s pipeline_id=%s story_id=%s",
                 self.project_id,

@@ -175,6 +175,39 @@ class StoryScriptSerializerTests(unittest.TestCase):
         self.assertNotIn("场景一环境", script)
         self.assertIn("场景二环境", script)
 
+    def test_serialize_story_to_script_normalizes_string_scene_identifiers_for_selection(self):
+        story = {
+            "scenes": [
+                {
+                    "episode": "1",
+                    "title": "测试集",
+                    "scenes": [
+                        {
+                            "scene_number": "1",
+                            "environment": "场景一环境",
+                            "visual": "场景一画面",
+                            "audio": [],
+                        },
+                        {
+                            "scene_number": "2",
+                            "environment": "场景二环境",
+                            "visual": "场景二画面",
+                            "audio": [],
+                        },
+                    ],
+                }
+            ],
+        }
+
+        script = serialize_story_to_script(
+            story,
+            selected_scene_numbers={1: [2]},
+        )
+
+        self.assertNotIn("场景一环境", script)
+        self.assertIn("场景二环境", script)
+        self.assertIn("# 第1集 测试集", script)
+
     def test_serialize_story_to_script_returns_empty_when_selection_matches_nothing(self):
         story = {
             "scenes": [

@@ -10,6 +10,13 @@ def _normalize_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _normalize_int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_scene_selection(selected_scene_numbers: Mapping[Any, Any] | None) -> dict[int, set[int]]:
     normalized: dict[int, set[int]] = {}
     if not isinstance(selected_scene_numbers, Mapping):
@@ -218,20 +225,25 @@ def serialize_story_to_script(
         if not isinstance(episode, Mapping):
             continue
 
-        episode_number = episode.get("episode")
+        raw_episode_number = episode.get("episode")
+        episode_number = _normalize_int(raw_episode_number)
         episode_scene_lines: list[str] = []
         for scene in episode.get("scenes", []) or []:
             if not isinstance(scene, Mapping):
                 continue
 
             if selection_enabled:
+                if episode_number is None:
+                    continue
                 if episode_number not in selection:
                     continue
-                if scene.get("scene_number") not in selection[episode_number]:
+                scene_number = _normalize_int(scene.get("scene_number"))
+                if scene_number is None or scene_number not in selection[episode_number]:
                     continue
 
             if not episode_scene_lines:
-                episode_scene_lines.append(f"# 第{episode_number}集 {_normalize_text(episode.get('title'))}")
+                episode_heading_number = episode_number if episode_number is not None else raw_episode_number
+                episode_scene_lines.append(f"# 第{episode_heading_number}集 {_normalize_text(episode.get('title'))}")
             episode_scene_lines.append("")
             episode_scene_lines.extend(_serialize_scene_lines(scene))
 

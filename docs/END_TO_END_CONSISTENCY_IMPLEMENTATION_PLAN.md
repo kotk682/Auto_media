@@ -474,11 +474,13 @@ transition 与 concat 更偏向读取 pipeline 当前真实资产，而不是只
 - `episode_reference_assets / scene_reference_assets` 是图像参考资产。
 - 两类都能影响运行期，但职责不同，不能混写成一个缓存。
 
-### 4.4 provider 不支持时优先“丢弃参数”而不是污染正向 prompt
+### 4.4 provider 不支持时优先“丢弃参数”而不是污染正向 prompt（后续目标态）
 
+- 以下原则描述的是后续目标态，不代表所有 provider 现在都已经满足这一边界。
 - 图片 provider 拒绝 `negative_prompt` 时，去掉它再试。
 - 图片 provider 拒绝 `reference_images` 时，去掉它再试。
 - 视频 provider 当前还没有统一的自动降级重试层；现状是保留 `negative_prompt` 接口参数，再由各 provider 自己决定透传或忽略。
+- 当前例外：`doubao` 仍会将高优先级 guardrails 折叠进正向 prompt，需兼容此行为直到替换或迁移完成。
 - 后续若补视频侧 capability negotiation / fallback，也应优先做“按 provider 丢弃不支持参数”，而不是把负面约束污染进正向 prose。
 - 不应把“不要出现什么”反向塞回正向 prose。
 

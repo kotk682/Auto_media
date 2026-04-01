@@ -122,10 +122,11 @@ async function readErrorDetail(res, fallbackMessage) {
   return fallbackMessage
 }
 
-export async function buildStoryboardScript(storyId, selectedScenes) {
+export async function buildStoryboardScript(storyId, selectedScenes, signal) {
   const res = await fetch(getUrl(`/${storyId}/storyboard-script`), {
     method: 'POST',
     headers: getHeaders(),
+    signal,
     body: JSON.stringify({ selected_scenes: normalizeSelectedScenes(selectedScenes) }),
   })
   if (!res.ok) {

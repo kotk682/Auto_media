@@ -419,10 +419,10 @@
               </p>
               <div class="transition-meta">
                 <span class="transition-chip">建议时长 1-2s</span>
-                <span v-if="item.result?.first_frame_source" class="transition-chip">
+                <span v-if="item.result?.first_frame_source?.diagnostic_note" class="transition-chip">
                   {{ item.result.first_frame_source.diagnostic_note }}
                 </span>
-                <span v-if="item.result?.last_frame_source" class="transition-chip">
+                <span v-if="item.result?.last_frame_source?.diagnostic_note" class="transition-chip">
                   {{ item.result.last_frame_source.diagnostic_note }}
                 </span>
                 <span class="transition-pill" :class="{ active: !!item.fromShot.video_url }">前镜视频</span>
@@ -1091,14 +1091,14 @@ function processFile(file) {
 }
 
 // 获取要解析的剧本
-async function getScript() {
+async function getScript(signal) {
   if (manualOverride.value) {
     if (pastedScript.value) return pastedScript.value.trim()
     if (uploadedScript.value) return uploadedScript.value.trim()
     return ''
   }
   if (hasStoryData.value) {
-    return await generateScriptFromSelection()
+    return await generateScriptFromSelection(signal)
   } else if (pastedScript.value) {
     return pastedScript.value.trim()
   } else if (uploadedScript.value) {
@@ -1108,11 +1108,11 @@ async function getScript() {
 }
 
 // 从选中的场景生成剧本文本
-async function generateScriptFromSelection() {
+async function generateScriptFromSelection(signal) {
   const storyId = effectiveStoryId()
   if (!storyId) return ''
 
-  const data = await buildStoryboardScript(storyId, selectedScenes.value)
+  const data = await buildStoryboardScript(storyId, selectedScenes.value, signal)
   return String(data?.script || '').trim()
 }
 
@@ -1139,31 +1139,42 @@ async function readApiError(response, fallbackMessage = '请求失败') {
 
 // 解析分镜
 async function parseStoryboard() {
+  parseAbortController?.abort()
+  const controller = new AbortController()
+  parseAbortController = controller
+  const { signal } = controller
+
+  isParsing.value = true
+  error.value = ''
+  transitionMessage.value = ''
+  progress.value = { show: true, label: '正在整理剧本文本...', percent: 10 }
+
   try {
-    const script = await getScript()
+    const script = await getScript(signal)
+
+    if (signal.aborted || parseAbortController !== controller) return
 
     if (!script) {
       error.value = '请先选择场景或输入剧本内容'
+      progress.value.show = false
+      if (parseAbortController === controller) {
+        isParsing.value = false
+        parseAbortController = null
+      }
       return
     }
 
-    isParsing.value = true
-    error.value = ''
-    transitionMessage.value = ''
     episodeReferenceErrors.value = {}
     storyStore.clearShots()
     concatVideoUrl.value = ''
     progress.value = { show: true, label: '正在调用 LLM 解析分镜...', percent: 20 }
-
-    parseAbortController?.abort()
-    parseAbortController = new AbortController()
-    const { signal } = parseAbortController
 
     // Mock 模式
     if (settings.useMock) {
       progress.value = { show: true, label: 'Mock 模式：生成模拟分镜...', percent: 50 }
 
       await new Promise(resolve => setTimeout(resolve, 800))
+      if (signal.aborted || parseAbortController !== controller) return
 
       const mockShots = [
       {
@@ -1226,13 +1237,14 @@ async function parseStoryboard() {
         imageLoading: false,
         videoLoading: false
       }
-    ]
+      ]
 
+      if (signal.aborted || parseAbortController !== controller) return
       progress.value = { show: true, label: '解析完成', percent: 100 }
       storyStore.setShots(mockShots)
 
       setTimeout(() => {
-        if (isMounted.value) progress.value.show = false
+        if (isMounted.value && !isParsing.value) progress.value.show = false
       }, 500)
 
       return
@@ -1257,12 +1269,14 @@ async function parseStoryboard() {
       })
     })
 
+    if (signal.aborted || parseAbortController !== controller) return
     if (!res.ok) {
       throw await readApiError(res, '请求失败')
     }
 
     progress.value = { show: true, label: '解析完成，渲染卡片...', percent: 90 }
     const data = await res.json()
+    if (signal.aborted || parseAbortController !== controller) return
     rememberManualPipelineContext({
       projectId,
       pipelineId: data.pipeline_id || '',
@@ -1279,12 +1293,12 @@ async function parseStoryboard() {
     if (isMounted.value) {
       progress.value = { show: true, label: '完成', percent: 100 }
       setTimeout(() => {
-        if (isMounted.value) progress.value.show = false
+        if (isMounted.value && !isParsing.value) progress.value.show = false
       }, 800)
     }
   } catch (err) {
     if (err.name === 'AbortError') return
-    if (!isMounted.value) return
+    if (!isMounted.value || parseAbortController !== controller) return
     const msg = err.message || '请求失败'
     if (err.status === 400) {
       keyModalType.value = 'missing'
@@ -1299,7 +1313,10 @@ async function parseStoryboard() {
     }
     progress.value.show = false
   } finally {
-    isParsing.value = false
+    if (parseAbortController === controller) {
+      isParsing.value = false
+      parseAbortController = null
+    }
   }
 }
 

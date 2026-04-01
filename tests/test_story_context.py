@@ -619,9 +619,10 @@ class StoryContextTests(unittest.TestCase):
 
         payload = build_generation_payload(shot, build_story_context(story))
 
+        expected_style = (_GENRE_STYLE_RULES.get(story["genre"]) or next(iter(_GENRE_STYLE_RULES.values())))[0]
         self.assertIn("short black hair", payload["image_prompt"])
         self.assertIn("dark blue robe", payload["image_prompt"])
-        self.assertIn(next(iter(_GENRE_STYLE_RULES.values()))[0], payload["image_prompt"])
+        self.assertIn(expected_style, payload["image_prompt"])
         self.assertNotIn("silver android", payload["image_prompt"])
         self.assertNotIn("neon armored coat", payload["image_prompt"])
         self.assertNotIn("futuristic megamall", payload["image_prompt"])

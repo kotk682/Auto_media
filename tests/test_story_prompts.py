@@ -10,6 +10,7 @@ _story_prompt_module = module_from_spec(_STORY_PROMPT_SPEC)
 _STORY_PROMPT_SPEC.loader.exec_module(_story_prompt_module)
 
 OUTLINE_PROMPT = _story_prompt_module.OUTLINE_PROMPT
+REFINE_PROMPT = _story_prompt_module.REFINE_PROMPT
 build_apply_chat_prompt = _story_prompt_module.build_apply_chat_prompt
 build_chat_messages = _story_prompt_module.build_chat_messages
 
@@ -38,6 +39,24 @@ class StoryPromptTests(unittest.TestCase):
         self.assertIn("毫米级划痕", prompt)
         self.assertIn("镜头调度说明", prompt)
 
+    def test_apply_chat_episode_prompt_requires_full_episode_fields(self):
+        prompt = build_apply_chat_prompt(
+            "episode",
+            {
+                "episode": 1,
+                "title": "雨夜来客",
+                "summary": "原始剧情",
+                "beats": ["旧节拍1", "旧节拍2"],
+                "scene_list": ["Scene 1: [夜] [室内] [回廊] - 主角发现线索"],
+            },
+            "用户: 给这一集增加反转",
+        )
+
+        self.assertIn("必须同时返回 title、summary、beats、scene_list 四个字段", prompt)
+        self.assertIn("`summary`、`beats`、`scene_list` 必须互相一致", prompt)
+        self.assertIn('"beats": ["Beat 1"]', prompt)
+        self.assertIn('"scene_list": ["Scene 1: [夜] [室内] [地点] - 场景任务"]', prompt)
+
     def test_build_chat_messages_character_mode_only_allows_humanizing_habits(self):
         messages = build_chat_messages(
             "character",
@@ -64,6 +83,11 @@ class StoryPromptTests(unittest.TestCase):
         self.assertIn('"key_props": ["关键物件1", "关键物件2"]', _story_prompt_module.SCRIPT_PROMPT)
         self.assertIn("只写稳定环境信息", _story_prompt_module.SCRIPT_PROMPT)
         self.assertIn("方便后续复用同一张环境图", _story_prompt_module.SCRIPT_PROMPT)
+
+    def test_refine_prompt_requires_full_episode_outline_fields(self):
+        self.assertIn("必须同时返回该集完整的 title、summary、beats、scene_list 四个字段", REFINE_PROMPT)
+        self.assertIn("beats 与 scene_list 必须同步到修改后的剧情", REFINE_PROMPT)
+        self.assertIn('"outline": null 或 [{{"episode": 1, "title": "标题", "summary": "概要", "beats": ["Beat 1"], "scene_list": ["Scene 1: [夜] [室内] [地点] - 场景任务"]}}]', REFINE_PROMPT)
 
 
 if __name__ == "__main__":
