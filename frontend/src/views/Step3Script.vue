@@ -125,6 +125,7 @@ onUnmounted(() => { scriptAbortController?.abort() })
 onMounted(() => {
   if (!canAccessStep(store, 3)) {
     router.replace(getStepRedirectPath(store, 3))
+    return
   }
 })
 
