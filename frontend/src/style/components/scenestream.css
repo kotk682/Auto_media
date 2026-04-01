@@ -4,9 +4,9 @@
   border-radius: 14px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-  animation: fadeIn 0.4s ease;
+  animation: fade-in 0.4s ease;
 }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .ep-header {
   background: #6c63ff;
   color: #fff;

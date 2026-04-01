@@ -16,7 +16,7 @@ h1 { font-size: 22px; font-weight: 700; margin: 0; }
 }
 .mode-banner.mock { background: #fff8e1; color: #f59e0b; }
 .mode-banner.live { background: #e8f5e9; color: #4caf50; }
-.mode-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: currentColor; }
+.mode-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: currentcolor; }
 
 .card {
   background: #fff; border-radius: 16px; padding: 20px 24px 24px;

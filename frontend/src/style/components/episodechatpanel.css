@@ -15,6 +15,17 @@
 }
 .close-btn { background: none; border: none; font-size: 16px; color: #aaa; cursor: pointer; padding: 4px; }
 .close-btn:hover { color: #555; }
+.close-btn:focus,
+.send-btn:focus,
+.confirm-btn:focus { outline: none; }
+.close-btn:focus-visible,
+.send-btn:focus-visible,
+.confirm-btn:focus-visible {
+  outline: 3px solid #1f1f1f;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(108, 99, 255, 0.28);
+}
+.close-btn:focus-visible { color: #555; }
 .episode-info { padding: 12px 16px; background: #f0eeff; border-bottom: 1px solid #e0d9ff; }
 .ep-num { font-size: 12px; color: #888; margin-bottom: 4px; }
 .ep-title { font-size: 14px; font-weight: 600; color: #6c63ff; }
@@ -47,11 +58,13 @@ textarea:focus { border-color: #6c63ff; outline: none; }
   border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
 }
 .send-btn:hover:not(:disabled) { background: #5a52e0; }
+.send-btn:focus-visible:not(:disabled) { background: #5a52e0; }
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .confirm-btn {
   padding: 10px; background: #6c63ff; color: #fff;
   border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
 }
 .confirm-btn:hover:not(:disabled) { background: #5a52e0; }
+.confirm-btn:focus-visible:not(:disabled) { background: #5a52e0; }
 .confirm-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .error-tip { padding: 0 16px 12px; color: #e53935; font-size: 12px; }
