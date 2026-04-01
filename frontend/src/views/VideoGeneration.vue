@@ -61,14 +61,29 @@
               </div>
               <div v-if="getEpisodeReferenceGroups(ep.episode).length" class="episode-key-art-group-list">
                 <div
-                  v-for="group in getEpisodeReferenceGroups(ep.episode)"
-                  :key="group.environment_pack_key"
+                  v-if="getEpisodeReferenceGroups(ep.episode).length > 1"
+                  class="episode-key-art-group-tabs"
+                >
+                  <button
+                    v-for="(group, index) in getEpisodeReferenceGroups(ep.episode)"
+                    :key="getEpisodeReferenceGroupKey(group, index)"
+                    type="button"
+                    class="episode-key-art-group-tab"
+                    :class="{ active: getActiveEpisodeReferenceGroupKey(ep.episode) === getEpisodeReferenceGroupKey(group, index) }"
+                    :aria-pressed="getActiveEpisodeReferenceGroupKey(ep.episode) === getEpisodeReferenceGroupKey(group, index)"
+                    @click.stop="setActiveEpisodeReferenceGroup(ep.episode, group, index)"
+                  >
+                    {{ group.group_label || `环境组 ${index + 1}` }}
+                  </button>
+                </div>
+                <div
+                  v-if="getActiveEpisodeReferenceGroup(ep.episode)"
                   class="episode-key-art-group"
                 >
                   <div class="episode-key-art-group-top">
-                    <div class="episode-key-art-group-title">{{ group.group_label || '环境组' }}</div>
+                    <div class="episode-key-art-group-title">{{ getActiveEpisodeReferenceGroup(ep.episode).group_label || '环境组' }}</div>
                     <div class="episode-key-art-group-copy">
-                      覆盖场景：{{ formatSceneNumbers(group.affected_scene_numbers) }} · {{ group.summary_environment || '主环境' }}
+                      覆盖场景：{{ formatSceneNumbers(getActiveEpisodeReferenceGroup(ep.episode).affected_scene_numbers) }} · {{ getActiveEpisodeReferenceGroup(ep.episode).summary_environment || '主环境' }}
                     </div>
                   </div>
                   <div class="episode-key-art-grid">
@@ -76,8 +91,8 @@
                       class="episode-key-art-card"
                     >
                       <img
-                        v-if="group.variants?.scene?.image_url"
-                        :src="getMediaUrl(group.variants.scene.image_url)"
+                        v-if="getActiveEpisodeReferenceGroup(ep.episode).variants?.scene?.image_url"
+                        :src="getMediaUrl(getActiveEpisodeReferenceGroup(ep.episode).variants.scene.image_url)"
                         class="episode-key-art-image"
                       />
                       <div v-else class="episode-key-art-placeholder">Scene Reference</div>
@@ -307,9 +322,6 @@
               </div>
               <div v-if="hasSpeechAudio(item.shot)" class="shot-field">
                 <label>台词 / 旁白</label>
-                <div v-if="formatAudioSpeaker(item.shot)" class="shot-audio-meta">
-                  <span class="tag type">{{ formatAudioSpeaker(item.shot) }}</span>
-                </div>
                 <p>{{ item.shot.audio_reference?.content || item.shot.dialogue }}</p>
               </div>
               <div class="shot-field">
@@ -363,16 +375,7 @@
               </div>
               <div class="transition-preview-strip">
                 <div class="transition-frame">
-                  <div class="transition-frame-label">
-                    前镜参考帧
-                    <span
-                      v-if="item.result?.first_frame_source"
-                      class="transition-frame-origin"
-                      :title="item.result.first_frame_source.extraction_error || item.result.first_frame_source.diagnostic_note || ''"
-                    >
-                      {{ formatTransitionFrameSourceChip(item.result.first_frame_source, '前镜') }}
-                    </span>
-                  </div>
+                  <div class="transition-frame-label">前镜参考帧</div>
                   <img
                     v-if="item.result?.first_frame_source?.extracted_image_url || item.fromShot.image_url"
                     :src="getMediaUrl(item.result?.first_frame_source?.extracted_image_url || item.fromShot.image_url)"
@@ -385,16 +388,7 @@
                   <span class="transition-arrow-text">过渡</span>
                 </div>
                 <div class="transition-frame">
-                  <div class="transition-frame-label">
-                    后镜首部
-                    <span
-                      v-if="item.result?.last_frame_source"
-                      class="transition-frame-origin"
-                      :title="item.result.last_frame_source.extraction_error || item.result.last_frame_source.diagnostic_note || ''"
-                    >
-                      {{ formatTransitionFrameSourceChip(item.result.last_frame_source, '后镜') }}
-                    </span>
-                  </div>
+                  <div class="transition-frame-label">后镜首部</div>
                   <img
                     v-if="item.result?.last_frame_source?.extracted_image_url || item.toShot.image_url"
                     :src="getMediaUrl(item.result?.last_frame_source?.extracted_image_url || item.toShot.image_url)"
@@ -410,21 +404,15 @@
                 class="shot-video"
               ></video>
               <p class="transition-copy">
-                {{ item.result?.diagnostic_summary || (item.result?.video_url
-                  ? '过渡视频已生成。当前会严格使用前镜最后一帧和后镜第一帧，并要求过渡平滑、人物环境稳定、镜头衔接自然。'
+                {{ item.result?.video_url
+                  ? '过渡视频已生成。当前会严格使用前镜最后一帧和后镜第一帧，避免主题漂移。'
                   : item.ready
-                    ? '前后镜头视频已就绪，可以生成过渡片段。后端会只读取这两个相邻视频的对应帧，并强调平滑自然的人物、环境与镜头连续性。'
+                    ? '前后镜头视频已就绪，可以生成过渡片段。后端会只读取这两个相邻视频的对应帧。'
                     : '等待前后镜头视频都准备好后，再进入可生成状态。'
-                ) }}
+                }}
               </p>
               <div class="transition-meta">
                 <span class="transition-chip">建议时长 1-2s</span>
-                <span v-if="item.result?.first_frame_source?.diagnostic_note" class="transition-chip">
-                  {{ item.result.first_frame_source.diagnostic_note }}
-                </span>
-                <span v-if="item.result?.last_frame_source?.diagnostic_note" class="transition-chip">
-                  {{ item.result.last_frame_source.diagnostic_note }}
-                </span>
                 <span class="transition-pill" :class="{ active: !!item.fromShot.video_url }">前镜视频</span>
                 <span class="transition-pill" :class="{ active: !!item.toShot.video_url }">后镜视频</span>
               </div>
@@ -438,7 +426,7 @@
                   {{ item.loading ? '生成中...' : (item.result?.video_url ? '重新生成过渡视频' : (item.ready ? '生成过渡视频' : '过渡视频待就绪')) }}
                 </button>
                 <span class="transition-hint">
-                  {{ item.result?.video_url ? '已接入后端，可重新生成覆盖当前结果' : (item.ready ? '将从两侧视频中抽取对应帧，并约束过渡平滑自然' : '先补齐两侧视频') }}
+                  {{ item.result?.video_url ? '已接入后端，可重新生成覆盖当前结果' : (item.ready ? '将从两侧视频中抽取对应帧' : '先补齐两侧视频') }}
                 </span>
               </div>
             </div>
@@ -461,7 +449,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSettingsStore } from '../stores/settings.js'
 import { useStoryStore } from '../stores/story.js'
-import { buildStoryboardScript, generateEpisodeSceneReference, generatePipelineTransition, getHeaders, getPipelineStatus } from '../api/story.js'
+import { generateEpisodeSceneReference, generatePipelineTransition, getHeaders, getPipelineStatus } from '../api/story.js'
 import StepIndicator from '../components/StepIndicator.vue'
 import ApiKeyModal from '../components/ApiKeyModal.vue'
 import { resolveBackendBaseUrl, resolveBackendMediaUrl } from '../utils/backend.js'
@@ -515,6 +503,7 @@ const manualPipelineId = ref(storyStore.manualPipelineId || '')
 const manualStoryId = ref(storyStore.manualStoryId || storyStore.storyId || '')
 const transitionLoadingMap = ref({})
 const episodeReferenceErrors = ref({})
+const activeEpisodeReferenceGroupKeys = ref({})
 
 const transitionResults = computed(() => {
   const generatedFiles = storyStore.meta?.storyboard_generation?.generated_files
@@ -529,14 +518,6 @@ const transitionTimeline = computed(() => {
 
 function buildTransitionId(fromShotId, toShotId) {
   return `transition_${fromShotId}__${toShotId}`
-}
-
-function formatTransitionFrameSourceChip(frameSource, sideLabel = '') {
-  if (!frameSource || typeof frameSource !== 'object') return ''
-  const prefix = sideLabel ? `${sideLabel}` : ''
-  return frameSource.source_type === 'storyboard_image_fallback'
-    ? `${prefix}回退分镜图`
-    : `${prefix}视频抽帧`
 }
 
 function buildLocalTimeline(shotsList = [], transitionsMap = {}) {
@@ -919,6 +900,36 @@ function getEpisodeReferenceGroups(episode) {
   return storyStore.getEpisodeSceneReferenceGroups(episode)
 }
 
+function getEpisodeReferenceGroupKey(group, index = 0) {
+  if (group?.environment_pack_key) return group.environment_pack_key
+  if (group?.group_label) return `${group.group_label}-${index}`
+  return `group-${index + 1}`
+}
+
+function getActiveEpisodeReferenceGroupKey(episode) {
+  const groups = getEpisodeReferenceGroups(episode)
+  if (!groups.length) return ''
+
+  const selectedKey = activeEpisodeReferenceGroupKeys.value[episode]
+  const hasSelectedGroup = groups.some((group, index) => getEpisodeReferenceGroupKey(group, index) === selectedKey)
+  if (hasSelectedGroup) return selectedKey
+
+  return getEpisodeReferenceGroupKey(groups[0], 0)
+}
+
+function getActiveEpisodeReferenceGroup(episode) {
+  const groups = getEpisodeReferenceGroups(episode)
+  const activeKey = getActiveEpisodeReferenceGroupKey(episode)
+  return groups.find((group, index) => getEpisodeReferenceGroupKey(group, index) === activeKey) || null
+}
+
+function setActiveEpisodeReferenceGroup(episode, group, index = 0) {
+  activeEpisodeReferenceGroupKeys.value = {
+    ...activeEpisodeReferenceGroupKeys.value,
+    [episode]: getEpisodeReferenceGroupKey(group, index),
+  }
+}
+
 function getEpisodeReferenceStatus(episode) {
   return storyStore.getEpisodeSceneReferenceStatus(episode)
 }
@@ -962,6 +973,10 @@ async function generateEpisodeReference(episode) {
     const forceRegenerate = storyStore.getEpisodeSceneReferenceGroups(episode.episode).length > 0
     const result = await generateEpisodeSceneReference(storyStore.storyId, episode.episode, { forceRegenerate })
     storyStore.applyEpisodeSceneReferenceAsset(result)
+    const nextGroups = storyStore.getEpisodeSceneReferenceGroups(episode.episode)
+    if (nextGroups.length > 0) {
+      setActiveEpisodeReferenceGroup(episode.episode, nextGroups[0], 0)
+    }
     episodeReferenceErrors.value = {
       ...episodeReferenceErrors.value,
       [episode.episode]: '',
@@ -1091,14 +1106,14 @@ function processFile(file) {
 }
 
 // 获取要解析的剧本
-async function getScript(signal) {
+function getScript() {
   if (manualOverride.value) {
     if (pastedScript.value) return pastedScript.value.trim()
     if (uploadedScript.value) return uploadedScript.value.trim()
     return ''
   }
   if (hasStoryData.value) {
-    return await generateScriptFromSelection(signal)
+    return generateScriptFromSelection()
   } else if (pastedScript.value) {
     return pastedScript.value.trim()
   } else if (uploadedScript.value) {
@@ -1108,12 +1123,36 @@ async function getScript(signal) {
 }
 
 // 从选中的场景生成剧本文本
-async function generateScriptFromSelection(signal) {
-  const storyId = effectiveStoryId()
-  if (!storyId) return ''
+function generateScriptFromSelection() {
+  const parts = []
 
-  const data = await buildStoryboardScript(storyId, selectedScenes.value, signal)
-  return String(data?.script || '').trim()
+  storyStore.scenes.forEach(episode => {
+    const selectedInEpisode = episode.scenes.filter(scene =>
+      selectedScenes.value[episode.episode]?.[scene.scene_number]
+    )
+
+    if (selectedInEpisode.length > 0) {
+      parts.push(`第 ${episode.episode} 集：${episode.title}\n`)
+
+      selectedInEpisode.forEach(scene => {
+        parts.push(`\n【场景 ${scene.scene_number}】`)
+        parts.push(`环境：${scene.environment ?? ''}`)
+        parts.push(`画面：${scene.visual ?? ''}`)
+
+        if (scene.audio && scene.audio.length > 0) {
+          scene.audio.forEach(a => {
+            const character = a?.character ?? ''
+            const line = a?.line ?? ''
+            if (!character && !line) return
+            parts.push(`${character}：${line}`)
+          })
+        }
+        parts.push('')
+      })
+    }
+  })
+
+  return parts.join('\n')
 }
 
 function isAuthError(msg) {
@@ -1139,44 +1178,34 @@ async function readApiError(response, fallbackMessage = '请求失败') {
 
 // 解析分镜
 async function parseStoryboard() {
-  parseAbortController?.abort()
-  const controller = new AbortController()
-  parseAbortController = controller
-  const { signal } = controller
+  const script = getScript()
+
+  if (!script) {
+    error.value = '请先选择场景或输入剧本内容'
+    return
+  }
 
   isParsing.value = true
   error.value = ''
   transitionMessage.value = ''
-  progress.value = { show: true, label: '正在整理剧本文本...', percent: 10 }
+  episodeReferenceErrors.value = {}
+  storyStore.clearShots()
+  concatVideoUrl.value = ''
+  progress.value = { show: true, label: '正在调用 LLM 解析分镜...', percent: 20 }
 
-  try {
-    const script = await getScript(signal)
+  parseAbortController?.abort()
+  const myController = new AbortController()
+  parseAbortController = myController
+  const { signal } = myController
 
-    if (signal.aborted || parseAbortController !== controller) return
+  // Mock 模式
+  if (settings.useMock) {
+    progress.value = { show: true, label: 'Mock 模式：生成模拟分镜...', percent: 50 }
 
-    if (!script) {
-      error.value = '请先选择场景或输入剧本内容'
-      progress.value.show = false
-      if (parseAbortController === controller) {
-        isParsing.value = false
-        parseAbortController = null
-      }
-      return
-    }
+    await new Promise(resolve => setTimeout(resolve, 800))
+    if (parseAbortController !== myController || !isMounted.value) return
 
-    episodeReferenceErrors.value = {}
-    storyStore.clearShots()
-    concatVideoUrl.value = ''
-    progress.value = { show: true, label: '正在调用 LLM 解析分镜...', percent: 20 }
-
-    // Mock 模式
-    if (settings.useMock) {
-      progress.value = { show: true, label: 'Mock 模式：生成模拟分镜...', percent: 50 }
-
-      await new Promise(resolve => setTimeout(resolve, 800))
-      if (signal.aborted || parseAbortController !== controller) return
-
-      const mockShots = [
+    const mockShots = [
       {
         shot_id: 'scene1_shot1',
         storyboard_description: '清晨的森林，阳光透过树叶洒下斑驳光影，一只小鹿在溪边饮水',
@@ -1237,19 +1266,18 @@ async function parseStoryboard() {
         imageLoading: false,
         videoLoading: false
       }
-      ]
+    ]
 
-      if (signal.aborted || parseAbortController !== controller) return
-      progress.value = { show: true, label: '解析完成', percent: 100 }
-      storyStore.setShots(mockShots)
+    progress.value = { show: true, label: '解析完成', percent: 100 }
+    storyStore.setShots(mockShots)
 
-      setTimeout(() => {
-        if (isMounted.value && !isParsing.value) progress.value.show = false
-      }, 500)
+    setTimeout(() => {
+      if (isMounted.value && parseAbortController === myController) progress.value.show = false
+    }, 500)
+    return
+  }
 
-      return
-    }
-
+  try {
     const projectId = resolveManualProjectId()
 
     progress.value = { show: true, label: 'LLM 处理中，请稍候...', percent: 60 }
@@ -1269,14 +1297,14 @@ async function parseStoryboard() {
       })
     })
 
-    if (signal.aborted || parseAbortController !== controller) return
     if (!res.ok) {
       throw await readApiError(res, '请求失败')
     }
+    if (parseAbortController !== myController || !isMounted.value) return
 
     progress.value = { show: true, label: '解析完成，渲染卡片...', percent: 90 }
     const data = await res.json()
-    if (signal.aborted || parseAbortController !== controller) return
+    if (parseAbortController !== myController || !isMounted.value) return
     rememberManualPipelineContext({
       projectId,
       pipelineId: data.pipeline_id || '',
@@ -1293,12 +1321,12 @@ async function parseStoryboard() {
     if (isMounted.value) {
       progress.value = { show: true, label: '完成', percent: 100 }
       setTimeout(() => {
-        if (isMounted.value && !isParsing.value) progress.value.show = false
+        if (isMounted.value && parseAbortController === myController) progress.value.show = false
       }, 800)
     }
   } catch (err) {
     if (err.name === 'AbortError') return
-    if (!isMounted.value || parseAbortController !== controller) return
+    if (!isMounted.value || parseAbortController !== myController) return
     const msg = err.message || '请求失败'
     if (err.status === 400) {
       keyModalType.value = 'missing'
@@ -1313,9 +1341,8 @@ async function parseStoryboard() {
     }
     progress.value.show = false
   } finally {
-    if (parseAbortController === controller) {
+    if (parseAbortController === myController) {
       isParsing.value = false
-      parseAbortController = null
     }
   }
 }
@@ -1351,14 +1378,6 @@ async function loadVoices() {
 
 function hasSpeechAudio(shot) {
   return !!(shot && (shot.audio_reference?.content || shot.dialogue) && shot.audio_reference?.type !== 'sfx')
-}
-
-function formatAudioSpeaker(shot) {
-  const type = shot?.audio_reference?.type || null
-  const speaker = String(shot?.audio_reference?.speaker || '').trim()
-  if (speaker) return speaker
-  if (type === 'narration') return '旁白'
-  return ''
 }
 
 function previewTransitionSlot(item) {
@@ -1917,1364 +1936,4 @@ onMounted(async () => {
 })
 </script>
 
-<style scoped>
-.page {
-  min-height: 100vh;
-  background: #f5f5f7;
-  color: #333;
-  padding: 40px 24px;
-}
-
-.content {
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-h1 {
-  font-size: 22px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: #1a1a1a;
-}
-
-.subtitle {
-  color: #666;
-  margin-bottom: 32px;
-  font-size: 14px;
-}
-
-/* 导入区域 */
-.story-import {
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-.import-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 20px;
-  background: linear-gradient(135deg, #f0eeff 0%, #fff 100%);
-  border: 1px solid #e0e0e0;
-  border-bottom: none;
-  border-radius: 12px 12px 0 0;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.import-icon {
-  font-size: 20px;
-}
-
-.import-header h3 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: #1a1a1a;
-}
-
-.scene-count {
-  font-size: 13px;
-  color: #6c63ff;
-  font-weight: 600;
-  background: #fff;
-  padding: 4px 12px;
-  border-radius: 12px;
-  border: 1px solid #d0d0ff;
-}
-
-.import-actions {
-  display: flex;
-  gap: 8px;
-  padding: 12px 20px;
-  background: #fafafa;
-  border: 1px solid #e0e0e0;
-  border-bottom: none;
-}
-
-.action-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: #fff;
-  color: #666;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.action-btn:hover {
-  border-color: #6c63ff;
-  color: #6c63ff;
-  background: #f0eeff;
-}
-
-/* 场景列表（参照 SceneStream） */
-.episode-list {
-  border: 1px solid #e0e0e0;
-  border-radius: 0 0 12px 12px;
-  overflow: hidden;
-}
-
-.episode-card {
-  border-bottom: 1px solid #e0e0e0;
-}
-
-.episode-card:last-child {
-  border-bottom: none;
-}
-
-.ep-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  background: #f8f8f8;
-  cursor: pointer;
-  transition: background 0.2s;
-  user-select: none;
-}
-
-.ep-header:hover {
-  background: #f0f0f0;
-}
-
-.ep-checkbox {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-}
-
-.ep-badge {
-  background: #6c63ff;
-  color: #fff;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.ep-title {
-  flex: 1;
-  font-size: 14px;
-  font-weight: 600;
-  color: #333;
-}
-
-.ep-count {
-  font-size: 12px;
-  color: #999;
-  background: #fff;
-  padding: 2px 8px;
-  border-radius: 10px;
-}
-
-.scenes {
-  padding: 0;
-}
-
-.scene-block {
-  border-top: 1px solid #f0f0f0;
-  transition: background 0.2s;
-}
-
-.scene-block.selected {
-  background: #f0eeff;
-}
-
-.scene-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  background: #fff;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.scene-header:hover {
-  background: #fafafa;
-}
-
-.scene-checkbox {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-}
-
-.scene-num {
-  color: #6c63ff;
-  font-weight: 600;
-  font-size: 13px;
-  flex: 1;
-}
-
-.toggle-script-btn {
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: #f0f0f0;
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #666;
-  font-size: 12px;
-  transition: all 0.2s;
-  padding: 0;
-}
-
-.toggle-script-btn:hover {
-  background: #e0e0ff;
-  color: #6c63ff;
-}
-
-.toggle-script-btn.expanded {
-  transform: rotate(180deg);
-  background: #f0eeff;
-  color: #6c63ff;
-}
-
-.scene-content {
-  padding: 0 16px 12px 42px;
-  overflow: hidden;
-  transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
-  max-height: 500px;
-  opacity: 1;
-}
-
-.scene-content.collapsed {
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  opacity: 0;
-}
-
-.scene-row {
-  margin-bottom: 6px;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.scene-tag {
-  color: #999;
-  font-weight: 600;
-}
-
-.scene-text {
-  color: #333;
-}
-
-.episode-key-art-panel {
-  margin: 12px 16px 0;
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px solid #ebe6ff;
-  background: linear-gradient(180deg, #fcfbff 0%, #f6f3ff 100%);
-}
-
-.episode-key-art-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.episode-key-art-title {
-  color: #2d2844;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.episode-key-art-subtitle {
-  color: #7f789c;
-  font-size: 12px;
-  margin-top: 2px;
-}
-
-.episode-key-art-status {
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.episode-key-art-status.idle {
-  background: #f2efff;
-  color: #7566ce;
-}
-
-.episode-key-art-status.loading {
-  background: #fff3d9;
-  color: #9b6c00;
-}
-
-.episode-key-art-status.ready {
-  background: #e8f8ec;
-  color: #217849;
-}
-
-.episode-key-art-status.failed {
-  background: #ffe7e7;
-  color: #c03d3d;
-}
-
-.episode-key-art-status.stale {
-  background: #eef1ff;
-  color: #5465c5;
-}
-
-.episode-key-art-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.episode-key-art-group-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.episode-key-art-group {
-  border-radius: 10px;
-  border: 1px solid #ddd7ff;
-  background: rgba(255, 255, 255, 0.78);
-  padding: 10px;
-}
-
-.episode-key-art-group-top {
-  margin-bottom: 10px;
-}
-
-.episode-key-art-group-title {
-  color: #2d2844;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.episode-key-art-group-copy {
-  color: #7f789c;
-  font-size: 12px;
-  margin-top: 3px;
-}
-
-.episode-key-art-card {
-  overflow: hidden;
-  border-radius: 10px;
-  border: 1px solid #dfd9ff;
-  background: #fff;
-}
-
-.episode-key-art-image,
-.episode-key-art-placeholder {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  display: block;
-}
-
-.episode-key-art-image {
-  object-fit: cover;
-}
-
-.episode-key-art-placeholder {
-  display: grid;
-  place-items: center;
-  background:
-    radial-gradient(circle at top left, rgba(108, 99, 255, 0.15), transparent 38%),
-    linear-gradient(135deg, #f6f0ff 0%, #fbf9ff 100%);
-  color: #9389c3;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.episode-key-art-label {
-  padding: 8px 10px 10px;
-  color: #4a4566;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.episode-key-art-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.episode-key-art-btn {
-  border: none;
-  border-radius: 8px;
-  padding: 9px 14px;
-  background: #6c63ff;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.episode-key-art-btn:disabled {
-  opacity: 0.7;
-  cursor: wait;
-}
-
-.episode-key-art-error {
-  color: #c03d3d;
-  font-size: 12px;
-}
-
-.episode-key-art-empty {
-  color: #7f789c;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.scene-reference-usage {
-  margin-top: 10px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  font-size: 12px;
-}
-
-.scene-reference-usage-label {
-  color: #6c63ff;
-  font-weight: 700;
-}
-
-.scene-reference-usage-value {
-  color: #6d6787;
-}
-
-.audio-lines {
-  margin-top: 8px;
-  padding: 8px 12px;
-  background: #fafafa;
-  border-radius: 6px;
-  border-left: 3px solid #6c63ff;
-}
-
-.audio-line {
-  font-size: 13px;
-  line-height: 1.6;
-  margin-bottom: 4px;
-}
-
-.character {
-  color: #6c63ff;
-  font-weight: 600;
-}
-
-.line {
-  color: #555;
-}
-
-/* 空状态 */
-.empty-state {
-  max-width: 600px;
-  margin: 60px auto;
-  padding: 48px 32px;
-  text-align: center;
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 12px;
-}
-
-.empty-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-}
-
-.empty-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 8px;
-}
-
-.empty-desc {
-  font-size: 14px;
-  color: #999;
-  margin-bottom: 24px;
-}
-
-.empty-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-}
-
-.primary-btn,
-.secondary-btn {
-  padding: 10px 24px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.primary-btn {
-  background: #6c63ff;
-  color: #fff;
-  border: none;
-}
-
-.primary-btn:hover {
-  background: #5a52e0;
-}
-
-.secondary-btn {
-  background: #fff;
-  color: #666;
-  border: 1px solid #e0e0e0;
-}
-
-.secondary-btn:hover {
-  border-color: #6c63ff;
-  color: #6c63ff;
-}
-
-/* 模态框 */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal {
-  background: #fff;
-  border-radius: 12px;
-  width: 90%;
-  max-width: 600px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e0e0e0;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.close-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: #f5f5f5;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 18px;
-  color: #666;
-  transition: all 0.2s;
-}
-
-.close-btn:hover {
-  background: #e0e0e0;
-  color: #333;
-}
-
-.modal-body {
-  padding: 20px;
-  flex: 1;
-  overflow-y: auto;
-}
-
-.tabs {
-  display: flex;
-  gap: 0;
-  margin-bottom: 16px;
-}
-
-.tab-btn {
-  background: none;
-  border: 1px solid #e0e0e0;
-  border-bottom: none;
-  border-radius: 8px 8px 0 0;
-  color: #888;
-  padding: 8px 20px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: color 0.2s, background 0.2s;
-}
-
-.tab-btn.active {
-  background: #fff;
-  color: #6c63ff;
-  border-color: #d0d0d0;
-}
-
-.tab-btn:hover:not(.active) {
-  color: #555;
-}
-
-.upload-area {
-  border: 2px dashed #d0d0d0;
-  border-radius: 8px;
-  padding: 40px;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
-}
-
-.upload-area:hover,
-.upload-area.drag-over {
-  border-color: #6c63ff;
-  background: #f0eeff;
-}
-
-.upload-area p {
-  color: #888;
-  font-size: 14px;
-  margin-top: 8px;
-}
-
-.script-textarea {
-  width: 100%;
-  min-height: 120px;
-  background: #fafafa;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  color: #333;
-  font-size: 13px;
-  padding: 12px;
-  resize: vertical;
-  line-height: 1.6;
-  font-family: inherit;
-}
-
-.script-textarea:focus {
-  border-color: #6c63ff;
-  outline: none;
-}
-
-.script-textarea::placeholder {
-  color: #aaa;
-}
-
-.modal-footer {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  padding: 16px 20px;
-  border-top: 1px solid #e0e0e0;
-}
-
-.cancel-btn,
-.confirm-btn {
-  padding: 10px 24px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.cancel-btn {
-  background: #fff;
-  color: #666;
-  border: 1px solid #e0e0e0;
-}
-
-.cancel-btn:hover {
-  border-color: #999;
-}
-
-.confirm-btn {
-  background: #6c63ff;
-  color: #fff;
-  border: none;
-}
-
-.confirm-btn:hover {
-  background: #5a52e0;
-}
-
-/* Controls */
-.controls {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 20px;
-  max-width: 600px;
-}
-
-.parse-btn {
-  background: linear-gradient(135deg, #6c63ff 0%, #8b7fff 100%);
-  color: #fff;
-  border: none;
-  border-radius: 12px;
-  padding: 14px 48px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s;
-  box-shadow: 0 4px 12px rgba(108, 99, 255, 0.3);
-}
-
-.parse-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #5a52e0 0%, #7566e8 100%);
-  box-shadow: 0 6px 16px rgba(108, 99, 255, 0.4);
-  transform: translateY(-1px);
-}
-
-.parse-btn:disabled {
-  background: #ccc;
-  cursor: not-allowed;
-  box-shadow: none;
-  transform: none;
-}
-
-select {
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  color: #333;
-  padding: 8px 12px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-button {
-  background: #6c63ff;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 10px 24px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-button:hover:not(:disabled) {
-  background: #5a52e0;
-}
-
-button:disabled {
-  background: #ccc;
-  cursor: not-allowed;
-}
-
-/* Progress */
-.progress-section {
-  max-width: 600px;
-  margin-top: 20px;
-}
-
-.progress-label {
-  font-size: 13px;
-  color: #666;
-  margin-bottom: 8px;
-}
-
-.progress-bar {
-  height: 4px;
-  background: #e0e0e0;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: #6c63ff;
-  width: 0%;
-  transition: width 0.4s;
-  border-radius: 4px;
-}
-
-/* Error */
-.error-message {
-  color: #e53935;
-  font-size: 13px;
-  margin-top: 16px;
-  max-width: 600px;
-  background: #fff;
-  border-left: 4px solid #e53935;
-  border-radius: 8px;
-  padding: 12px;
-}
-
-.info-message {
-  color: #1d4ed8;
-  font-size: 13px;
-  margin-top: 16px;
-  max-width: 600px;
-  background: #eff6ff;
-  border-left: 4px solid #60a5fa;
-  border-radius: 8px;
-  padding: 12px;
-}
-
-/* Storyboard */
-.storyboard {
-  margin-top: 40px;
-}
-
-.storyboard-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-.storyboard-header h2 {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1a1a1a;
-}
-
-.export-readiness-note {
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid #f0d7a1;
-  background: #fff8e8;
-  color: #8a5b00;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.action-group {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.voice-select {
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  color: #333;
-  padding: 6px 10px;
-  font-size: 13px;
-}
-
-.action-btn {
-  font-size: 13px;
-  padding: 8px 20px;
-}
-
-.transition-note {
-  margin-bottom: 16px;
-  padding: 14px 16px;
-  border: 1px solid #d7d1bf;
-  border-radius: 12px;
-  background:
-    linear-gradient(135deg, rgba(238, 231, 209, 0.95), rgba(246, 242, 232, 0.98));
-  color: #63553a;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.shots-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-}
-
-.shot-card {
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 12px;
-  padding: 16px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.shot-card:hover {
-  border-color: #6c63ff;
-  box-shadow: 0 2px 12px rgba(108, 99, 255, 0.1);
-}
-
-.transition-slot {
-  position: relative;
-  overflow: hidden;
-  background:
-    linear-gradient(160deg, rgba(255, 248, 235, 0.98), rgba(247, 241, 228, 0.98));
-  border: 1px dashed #d1b97c;
-  border-radius: 12px;
-  padding: 16px;
-  min-height: 220px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.transition-slot::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 4px;
-  background: linear-gradient(180deg, #b7852d, #e1ca8a);
-}
-
-.transition-slot.ready {
-  border-style: solid;
-  border-color: #b7852d;
-  box-shadow: 0 8px 24px rgba(183, 133, 45, 0.12);
-}
-
-.transition-slot-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.transition-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.transition-title-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.transition-kicker {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #a07018;
-}
-
-.transition-pair {
-  font-size: 11px;
-  color: #8b7750;
-  text-align: right;
-  word-break: break-word;
-}
-
-.transition-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: #4f3d1d;
-}
-
-.transition-status-badge {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  background: rgba(116, 103, 81, 0.12);
-  color: #7f6d49;
-  border: 1px solid rgba(116, 103, 81, 0.18);
-}
-
-.transition-status-badge.ready {
-  background: rgba(183, 133, 45, 0.15);
-  color: #87590f;
-  border-color: rgba(183, 133, 45, 0.3);
-}
-
-.transition-preview-strip {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-}
-
-.transition-frame {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.transition-frame-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  font-size: 10px;
-  color: #8f7d59;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.transition-frame-origin {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(183, 133, 45, 0.12);
-  color: #8e6320;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.transition-frame-image,
-.transition-frame-placeholder {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border-radius: 10px;
-}
-
-.transition-frame-image {
-  object-fit: cover;
-  border: 1px solid rgba(177, 152, 97, 0.22);
-  box-shadow: 0 8px 20px rgba(116, 93, 44, 0.08);
-}
-
-.transition-frame-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
-  text-align: center;
-  font-size: 12px;
-  color: #907f5d;
-  background:
-    linear-gradient(135deg, rgba(255, 252, 245, 0.9), rgba(239, 232, 214, 0.9));
-  border: 1px dashed rgba(177, 152, 97, 0.35);
-}
-
-.transition-arrow-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.transition-arrow-line {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 2px;
-  background: linear-gradient(90deg, rgba(183, 133, 45, 0.15), rgba(183, 133, 45, 0.92));
-}
-
-.transition-arrow-line::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  right: -1px;
-  width: 10px;
-  height: 10px;
-  border-top: 2px solid #b7852d;
-  border-right: 2px solid #b7852d;
-  transform: translateY(-50%) rotate(45deg);
-}
-
-.transition-arrow-text {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #b7852d;
-}
-
-.transition-copy {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #6c5b3b;
-}
-
-.transition-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: auto;
-}
-
-.transition-chip {
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: rgba(79, 61, 29, 0.08);
-  color: #5e4a27;
-  font-size: 11px;
-  border: 1px solid rgba(79, 61, 29, 0.12);
-}
-
-.transition-pill {
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: rgba(122, 106, 69, 0.08);
-  color: #8c7d5a;
-  font-size: 11px;
-  border: 1px solid rgba(122, 106, 69, 0.14);
-}
-
-.transition-pill.active {
-  background: rgba(183, 133, 45, 0.15);
-  color: #7a5311;
-  border-color: rgba(183, 133, 45, 0.35);
-}
-
-.transition-btn {
-  margin-top: 4px;
-  border: none;
-  border-radius: 10px;
-  padding: 10px 14px;
-  background: #b7852d;
-  color: #fffaf1;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s, opacity 0.2s, transform 0.2s;
-}
-
-.transition-btn:hover {
-  background: #9f711f;
-  transform: translateY(-1px);
-}
-
-.transition-btn.disabled {
-  background: #cdb88c;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.transition-action-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.transition-hint {
-  font-size: 11px;
-  color: #8f7f5c;
-}
-
-.shot-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.shot-id {
-  font-size: 11px;
-  font-weight: 700;
-  color: #6c63ff;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.shot-meta {
-  display: flex;
-  gap: 6px;
-}
-
-.tag {
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 20px;
-  background: #f0f0f0;
-  color: #888;
-}
-
-.tag.type {
-  background: #f0eeff;
-  color: #6c63ff;
-}
-
-.shot-field {
-  margin-bottom: 10px;
-}
-
-.shot-audio-meta {
-  margin-bottom: 6px;
-}
-
-.shot-field label {
-  font-size: 10px;
-  color: #999;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  display: block;
-  margin-bottom: 4px;
-}
-
-.shot-field p {
-  font-size: 13px;
-  color: #333;
-  line-height: 1.5;
-}
-
-.shot-field .en {
-  font-size: 12px;
-  color: #888;
-  font-style: italic;
-}
-
-.tts-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
-}
-
-.tts-btn {
-  font-size: 11px;
-  padding: 4px 12px;
-  border-radius: 6px;
-  background: #f0eeff;
-  color: #6c63ff;
-  border: 1px solid #d0d0ff;
-  cursor: pointer;
-}
-
-.tts-btn:hover:not(:disabled) {
-  background: #e0d9ff;
-}
-
-.tts-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.tts-duration {
-  font-size: 11px;
-  color: #999;
-}
-
-.shot-image {
-  width: 100%;
-  border-radius: 6px;
-  margin-top: 8px;
-}
-
-.shot-video {
-  width: 100%;
-  border-radius: 6px;
-  margin-top: 8px;
-}
-
-@media (max-width: 720px) {
-  .episode-key-art-top,
-  .episode-key-art-actions {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .episode-key-art-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .transition-slot-top {
-    flex-direction: column;
-  }
-
-  .transition-pair {
-    text-align: left;
-  }
-
-  .transition-preview-strip {
-    grid-template-columns: 1fr;
-  }
-
-  .transition-arrow-wrap {
-    min-height: 42px;
-  }
-
-  .transition-arrow-line {
-    width: 2px;
-    height: 28px;
-    background: linear-gradient(180deg, rgba(183, 133, 45, 0.15), rgba(183, 133, 45, 0.92));
-  }
-
-  .transition-arrow-line::after {
-    top: auto;
-    right: 50%;
-    bottom: -1px;
-    transform: translateX(50%) rotate(135deg);
-  }
-}
-/* 导出完整视频按钮 */
-.concat-btn {
-  background: #6c63ff;
-  color: #fff;
-  border-color: #6c63ff;
-}
-
-.concat-btn:hover:not(:disabled) {
-  background: #5a52e0;
-  border-color: #5a52e0;
-}
-
-.concat-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* 完整视频播放区域 */
-.concat-result {
-  margin-top: 24px;
-  padding: 20px;
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 12px;
-}
-
-.concat-result h3 {
-  margin: 0 0 12px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1a1a1a;
-}
-
-.concat-video {
-  width: 100%;
-  border-radius: 8px;
-  margin-bottom: 12px;
-}
-
-.download-btn {
-  display: inline-flex;
-  text-decoration: none;
-  background: #6c63ff;
-  color: #fff;
-  border-color: #6c63ff;
-}
-
-.download-btn:hover {
-  background: #5a52e0;
-  border-color: #5a52e0;
-  color: #fff;
-}
-
-</style>
+<style scoped src="../style/videogeneration.css"></style>

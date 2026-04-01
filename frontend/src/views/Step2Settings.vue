@@ -76,9 +76,9 @@
       <!-- 完成状态 -->
       <div v-if="complete || (!store.wbCurrentQuestion && store.wbTurn > 0)" class="complete-area">
         <div class="complete-msg">{{ store.meta ? '世界观构建完成！' : '世界观构建完成，正在生成大纲...' }}</div>
-        <button v-if="store.meta && !submitting" class="submit-btn" style="margin-top: 12px" @click="router.push('/step3')">前往剧本生成 →</button>
-        <button v-if="error && !submitting && !store.meta" class="submit-btn" style="margin-top: 12px" @click="retryOutline">重试生成大纲</button>
-        <div v-if="error" class="error-tip" style="margin-top: 8px">{{ error }}</div>
+        <button v-if="store.meta && !submitting" class="submit-btn complete-action-btn" @click="router.push('/step3')">前往剧本生成 →</button>
+        <button v-if="error && !submitting && !store.meta" class="submit-btn complete-action-btn" @click="retryOutline">重试生成大纲</button>
+        <div v-if="error" class="error-tip complete-error-tip">{{ error }}</div>
       </div>
     </div>
   </div>
@@ -206,106 +206,4 @@ async function submitTurn() {
 }
 </script>
 
-<style scoped>
-.page { min-height: 100vh; background: #f5f5f7; padding: 32px 16px; }
-.content { max-width: 600px; margin: 32px auto 0; display: flex; flex-direction: column; gap: 16px; }
-h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
-.subtitle { color: #888; margin-bottom: 8px; }
-
-.idea-recap {
-  background: #fff;
-  border-radius: 12px;
-  padding: 12px 16px;
-  border-left: 4px solid #6c63ff;
-  cursor: pointer;
-  user-select: none;
-}
-.recap-header { display: flex; justify-content: space-between; align-items: center; }
-.recap-label { font-size: 13px; font-weight: 600; color: #6c63ff; }
-.recap-toggle { font-size: 11px; color: #aaa; }
-.recap-body { margin-top: 8px; font-size: 14px; color: #555; line-height: 1.6; }
-
-.chat-history {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: 360px;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-.bubble { max-width: 85%; }
-.bubble.ai { align-self: flex-start; }
-.bubble.user { align-self: flex-end; }
-.bubble-text {
-  padding: 12px 16px;
-  border-radius: 16px;
-  font-size: 14px;
-  line-height: 1.6;
-}
-.bubble.ai .bubble-text { background: #fff; color: #333; border-bottom-left-radius: 4px; }
-.bubble.user .bubble-text { background: #6c63ff; color: #fff; border-bottom-right-radius: 4px; }
-.thinking { color: #aaa; font-style: italic; }
-
-.input-area { display: flex; flex-direction: column; gap: 12px; }
-.progress-bar { height: 4px; background: #e0e0e0; border-radius: 2px; }
-.progress-fill { height: 100%; background: #6c63ff; border-radius: 2px; transition: width 0.4s; }
-.progress-label { font-size: 12px; color: #aaa; text-align: right; margin-top: -8px; }
-
-.options-group { display: flex; gap: 8px; flex-wrap: wrap; }
-.opt-btn {
-  padding: 10px 18px;
-  border-radius: 20px;
-  background: #fff;
-  border: 2px solid #e0e0e0;
-  font-size: 14px;
-  color: #555;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.opt-btn:hover { border-color: #6c63ff; color: #6c63ff; }
-.opt-btn.selected { border-color: #6c63ff; background: #f0eeff; color: #6c63ff; font-weight: 600; }
-.opt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.open-input {
-  width: 100%;
-  padding: 12px 16px;
-  border-radius: 12px;
-  border: 2px solid #e0e0e0;
-  font-size: 14px;
-  resize: none;
-  line-height: 1.6;
-  font-family: inherit;
-  transition: border-color 0.2s;
-}
-.open-input:focus { border-color: #6c63ff; outline: none; }
-.open-input:disabled { background: #f9f9f9; color: #999; cursor: not-allowed; }
-
-.btn-row { display: flex; gap: 12px; }
-.back-btn {
-  padding: 12px 18px;
-  background: #fff;
-  color: #555;
-  border-radius: 12px;
-  font-size: 14px;
-  border: 2px solid #e0e0e0;
-  cursor: pointer;
-}
-.back-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.submit-btn {
-  flex: 1;
-  padding: 12px;
-  background: #6c63ff;
-  color: #fff;
-  border-radius: 12px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.submit-btn:hover:not(:disabled) { background: #5a52e0; }
-.submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.complete-area { text-align: center; padding: 24px; }
-.complete-msg { color: #6c63ff; font-size: 15px; font-weight: 600; }
-.error-tip { color: #e53935; font-size: 13px; text-align: center; }
-</style>
+<style scoped src="../style/step2settings.css"></style>

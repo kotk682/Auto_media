@@ -66,7 +66,7 @@
             v-if="llmModelSelect === 'custom'"
             v-model="llmModelCustom"
             placeholder="输入模型名称，如 claude-3-5-sonnet-latest"
-            style="margin-top:6px"
+            class="model-custom-input"
           />
         </div>
 
@@ -85,17 +85,17 @@
           </div>
           <span class="hint">启用后，分镜生成步骤将使用下方独立配置（服务商 / API Key / 模型），其余步骤仍使用上方默认 LLM 配置。</span>
           <template v-if="useScriptModel">
-            <div class="field" style="margin-top:12px; margin-bottom:0">
+            <div class="field field-top-gap field-compact">
               <label for="script-provider">服务商</label>
               <select id="script-provider" v-model="scriptProvider" @change="onScriptProviderChange" class="select-input">
                 <option v-for="p in LLM_PROVIDERS" :key="p.id" :value="p.id">{{ p.label }}</option>
               </select>
             </div>
-            <div class="field" style="margin-bottom:0">
+            <div class="field field-compact">
               <label for="script-base-url">Base URL</label>
               <input id="script-base-url" v-model="scriptBaseUrl" placeholder="https://api.example.com/v1" />
             </div>
-            <div class="field" style="margin-bottom:0">
+            <div class="field field-compact">
               <label for="script-api-key">API Key</label>
               <div class="input-row">
                 <input id="script-api-key" v-model="scriptApiKey" :type="showScriptKey ? 'text' : 'password'" placeholder="sk-..." />
@@ -103,7 +103,7 @@
               </div>
               <span class="hint">密钥仅保存在本地浏览器中</span>
             </div>
-            <div class="field" style="margin-bottom:0">
+            <div class="field field-compact">
               <label for="script-model-select">模型</label>
               <select id="script-model-select" v-model="scriptModelSelect" class="select-input">
                 <option v-for="m in currentScriptModels" :key="m.id" :value="m.id">{{ m.label }}</option>
@@ -114,7 +114,7 @@
                 v-model="scriptModelCustom"
                 aria-label="自定义模型名称"
                 placeholder="输入模型名称，如 claude-opus-4-6"
-                style="margin-top:6px"
+                class="model-custom-input"
               />
             </div>
           </template>
@@ -155,7 +155,7 @@
             v-if="imageModelSelect === 'custom'"
             v-model="imageModelCustom"
             :placeholder="imageProvider === 'doubao' ? '输入端点 ID，如 ep-xxxxxxxx' : '输入模型名称，如 black-forest-labs/FLUX.1-schnell'"
-            style="margin-top:6px"
+            class="model-custom-input"
           />
         </div>
       </div>
@@ -196,7 +196,7 @@
             v-if="videoModelSelect === 'custom'"
             v-model="videoModelCustom"
             :placeholder="videoProvider === 'doubao' ? '输入端点 ID，如 ep-xxxxxxxx' : '输入模型名称，如 wan2.1-i2v-turbo'"
-            style="margin-top:6px"
+            class="model-custom-input"
           />
         </div>
       </div>
@@ -383,116 +383,4 @@ function save() {
 }
 </script>
 
-<style scoped>
-.page { min-height: 100vh; background: #f0f0f5; padding: 32px 16px; }
-.header { max-width: 600px; margin: 0 auto 16px; display: flex; align-items: center; gap: 16px; }
-.back-btn {
-  padding: 6px 14px; background: #fff; color: #6c63ff;
-  border: 1.5px solid #6c63ff; border-radius: 8px;
-  font-size: 13px; font-weight: 600; cursor: pointer;
-}
-.back-btn:hover { background: #f0eeff; }
-h1 { font-size: 22px; font-weight: 700; margin: 0; }
-.content { max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
-
-.mode-banner {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 16px; border-radius: 10px;
-  font-size: 13px; font-weight: 500;
-}
-.mode-banner.mock { background: #fff8e1; color: #f59e0b; }
-.mode-banner.live { background: #e8f5e9; color: #4caf50; }
-.mode-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: currentColor; }
-
-.card {
-  background: #fff; border-radius: 16px; padding: 20px 24px 24px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.07);
-  border-left: 4px solid transparent;
-}
-.card-backend { border-left-color: #94a3b8; }
-.card-llm     { border-left-color: #6c63ff; }
-.card-image   { border-left-color: #f59e0b; }
-.card-video   { border-left-color: #10b981; }
-
-.section-header {
-  display: flex; align-items: center; gap: 8px;
-  margin-bottom: 16px; padding-bottom: 12px;
-  border-bottom: 1px solid #f3f4f6;
-}
-.section-icon { font-size: 16px; line-height: 1; }
-.section-title { font-size: 13px; font-weight: 700; color: #374151; letter-spacing: 0.03em; }
-
-.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
-.field:last-child { margin-bottom: 0; }
-label { font-size: 13px; font-weight: 600; color: #555; }
-
-.input-row { display: flex; gap: 8px; }
-.input-row input { flex: 1; }
-
-.select-input {
-  padding: 10px 14px; border: 1.5px solid #e0e0e0; border-radius: 10px;
-  font-size: 14px; background: #fff; outline: none; cursor: pointer; transition: border-color 0.2s;
-}
-.select-input:focus { border-color: #6c63ff; }
-input {
-  padding: 10px 14px; border: 1.5px solid #e0e0e0; border-radius: 10px;
-  font-size: 14px; outline: none; transition: border-color 0.2s; width: 100%; box-sizing: border-box;
-}
-input:focus { border-color: #6c63ff; }
-.hint { font-size: 12px; color: #aaa; }
-.hint-inline { font-size: 11px; color: #bbb; font-weight: 400; }
-.status-ok { font-size: 12px; color: #4caf50; font-weight: 600; }
-.status-fail { font-size: 12px; color: #e53935; }
-
-.test-btn, .toggle-btn {
-  padding: 0 14px; border: 1.5px solid #e0e0e0; border-radius: 10px;
-  font-size: 13px; background: #fff; color: #555; cursor: pointer;
-  white-space: nowrap; transition: all 0.2s; flex-shrink: 0;
-}
-.test-btn:hover:not(:disabled), .toggle-btn:hover { border-color: #6c63ff; color: #6c63ff; }
-.test-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.btn-row { display: flex; gap: 10px; }
-.save-btn {
-  flex: 1; padding: 13px;
-  background: linear-gradient(135deg, #6c63ff, #a78bfa);
-  color: #fff; border-radius: 12px; font-size: 15px;
-  font-weight: 600; transition: opacity 0.2s; cursor: pointer;
-}
-.save-btn:hover { opacity: 0.9; }
-.saved-tip { text-align: center; color: #4caf50; font-size: 14px; font-weight: 600; }
-
-/* 高级选项 */
-.advanced-toggle {
-  display: flex; align-items: center; gap: 6px;
-  margin-top: 4px; padding: 6px 0; cursor: pointer;
-  font-size: 12px; color: #888; user-select: none;
-  border-top: 1px dashed #eee;
-}
-.advanced-toggle:hover { color: #6c63ff; }
-.advanced-arrow { font-size: 10px; transition: transform 0.2s; display: inline-block; }
-.advanced-arrow.open { transform: rotate(90deg); }
-.advanced-section {
-  margin-top: 12px; padding: 14px 16px; background: #f8f7ff;
-  border-radius: 10px; border: 1px solid #ede9ff;
-  display: flex; flex-direction: column; gap: 8px;
-}
-.adv-row { display: flex; align-items: center; justify-content: space-between; }
-.adv-label { font-size: 13px; font-weight: 600; color: #555; }
-
-/* Toggle switch */
-.toggle-switch { position: relative; display: inline-block; width: 38px; height: 22px; flex-shrink: 0; }
-.toggle-switch input { opacity: 0; width: 0; height: 0; }
-.toggle-track {
-  position: absolute; inset: 0; border-radius: 22px;
-  background: #d1d5db; cursor: pointer; transition: background 0.2s;
-}
-.toggle-track::before {
-  content: ''; position: absolute;
-  width: 16px; height: 16px; left: 3px; bottom: 3px;
-  border-radius: 50%; background: #fff; transition: transform 0.2s;
-}
-.toggle-switch input:checked + .toggle-track { background: #6c63ff; }
-.toggle-switch input:checked + .toggle-track::before { transform: translateX(16px); }
-.toggle-switch input:focus-visible + .toggle-track { outline: 2px solid #6c63ff; outline-offset: 2px; }
-</style>
+<style scoped src="../style/settingsview.css"></style>

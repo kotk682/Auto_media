@@ -85,18 +85,4 @@ function download(filename, content, type) {
 }
 </script>
 
-<style scoped>
-.export-panel { display: flex; gap: 12px; }
-.export-btn {
-  padding: 12px 24px;
-  background: #6c63ff;
-  color: #fff;
-  border-radius: 10px;
-  font-size: 15px;
-  font-weight: 600;
-  transition: background 0.2s;
-}
-.export-btn:hover { background: #5a52e0; }
-.export-btn.md { background: #10b981; }
-.export-btn.md:hover { background: #059669; }
-</style>
+<style scoped src="../style/components/exportpanel.css"></style>

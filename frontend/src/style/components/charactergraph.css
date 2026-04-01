@@ -1,0 +1,15 @@
+.graph-wrap {
+  background: #fff;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.graph-title { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 8px; }
+.graph-svg { width: 100%; height: auto; display: block; }
+.edge { stroke: #a78bfa; stroke-width: 1.5; }
+.edge-label-bg { fill: #f0eeff; }
+.edge-label { font-size: 11px; fill: #6c63ff; text-anchor: middle; dominant-baseline: middle; }
+.node-circle { fill: #6c63ff; transition: fill 0.2s; }
+.node-group:hover .node-circle { fill: #5a52e0; }
+.node-name { font-size: 12px; fill: #fff; font-weight: 700; text-anchor: middle; dominant-baseline: middle; }
+.node-role { font-size: 11px; fill: #888; text-anchor: middle; }
