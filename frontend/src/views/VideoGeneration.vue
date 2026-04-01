@@ -1136,12 +1136,15 @@ function generateScriptFromSelection() {
 
       selectedInEpisode.forEach(scene => {
         parts.push(`\n【场景 ${scene.scene_number}】`)
-        parts.push(`环境：${scene.environment}`)
-        parts.push(`画面：${scene.visual}`)
+        parts.push(`环境：${scene.environment ?? ''}`)
+        parts.push(`画面：${scene.visual ?? ''}`)
 
         if (scene.audio && scene.audio.length > 0) {
           scene.audio.forEach(a => {
-            parts.push(`${a.character}：${a.line}`)
+            const character = a?.character ?? ''
+            const line = a?.line ?? ''
+            if (!character && !line) return
+            parts.push(`${character}：${line}`)
           })
         }
         parts.push('')
@@ -1191,14 +1194,16 @@ async function parseStoryboard() {
   progress.value = { show: true, label: '正在调用 LLM 解析分镜...', percent: 20 }
 
   parseAbortController?.abort()
-  parseAbortController = new AbortController()
-  const { signal } = parseAbortController
+  const myController = new AbortController()
+  parseAbortController = myController
+  const { signal } = myController
 
   // Mock 模式
   if (settings.useMock) {
     progress.value = { show: true, label: 'Mock 模式：生成模拟分镜...', percent: 50 }
 
     await new Promise(resolve => setTimeout(resolve, 800))
+    if (parseAbortController !== myController || !isMounted.value) return
 
     const mockShots = [
       {
@@ -1267,10 +1272,8 @@ async function parseStoryboard() {
     storyStore.setShots(mockShots)
 
     setTimeout(() => {
-      if (isMounted.value) progress.value.show = false
+      if (isMounted.value && parseAbortController === myController) progress.value.show = false
     }, 500)
-
-    isParsing.value = false
     return
   }
 
@@ -1297,9 +1300,11 @@ async function parseStoryboard() {
     if (!res.ok) {
       throw await readApiError(res, '请求失败')
     }
+    if (parseAbortController !== myController || !isMounted.value) return
 
     progress.value = { show: true, label: '解析完成，渲染卡片...', percent: 90 }
     const data = await res.json()
+    if (parseAbortController !== myController || !isMounted.value) return
     rememberManualPipelineContext({
       projectId,
       pipelineId: data.pipeline_id || '',
@@ -1316,12 +1321,12 @@ async function parseStoryboard() {
     if (isMounted.value) {
       progress.value = { show: true, label: '完成', percent: 100 }
       setTimeout(() => {
-        if (isMounted.value) progress.value.show = false
+        if (isMounted.value && parseAbortController === myController) progress.value.show = false
       }, 800)
     }
   } catch (err) {
     if (err.name === 'AbortError') return
-    if (!isMounted.value) return
+    if (!isMounted.value || parseAbortController !== myController) return
     const msg = err.message || '请求失败'
     if (err.status === 400) {
       keyModalType.value = 'missing'
@@ -1336,7 +1341,9 @@ async function parseStoryboard() {
     }
     progress.value.show = false
   } finally {
-    isParsing.value = false
+    if (parseAbortController === myController) {
+      isParsing.value = false
+    }
   }
 }
 
