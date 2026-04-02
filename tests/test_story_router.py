@@ -88,7 +88,15 @@ class StoryRouterPatchTests(unittest.IsolatedAsyncioTestCase):
             result = await api_patch(
                 PatchStoryRequest(
                     story_id="story-patch-test",
-                    outline=[{"episode": 1, "title": "新标题", "summary": "新摘要"}],
+                    outline=[
+                        {
+                            "episode": 1,
+                            "title": "新标题",
+                            "summary": "新摘要",
+                            "beats": ["Beat 1"],
+                            "scene_list": ["Scene 1: [夜] [室内] [茶馆] - 主角进入茶馆。"],
+                        }
+                    ],
                 ),
                 db=None,
             )
@@ -98,7 +106,15 @@ class StoryRouterPatchTests(unittest.IsolatedAsyncioTestCase):
             None,
             "story-patch-test",
             {
-                "outline": [OutlineScene(episode=1, title="新标题", summary="新摘要")],
+                "outline": [
+                    OutlineScene(
+                        episode=1,
+                        title="新标题",
+                        summary="新摘要",
+                        beats=["Beat 1"],
+                        scene_list=["Scene 1: [夜] [室内] [茶馆] - 主角进入茶馆。"],
+                    )
+                ],
                 "scenes": [],
             },
         )

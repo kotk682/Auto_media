@@ -1418,6 +1418,7 @@ async def parse_script_to_storyboard(
     base_url: str = "",
     character_info: Optional[dict] = None,
     character_section_override: Optional[str] = None,
+    telemetry_context: Optional[dict[str, Any]] = None,
 ) -> tuple[list[Shot], dict]:
     """
     Parse script to storyboard shots.
@@ -1458,6 +1459,10 @@ async def parse_script_to_storyboard(
             ],
             temperature=0.2,
             enable_caching=True,
+            telemetry_context={
+                **dict(telemetry_context or {}),
+                "operation": "storyboard.parse",
+            },
         )
     except Exception as exc:
         resolved_base_url = base_url or "(default)"

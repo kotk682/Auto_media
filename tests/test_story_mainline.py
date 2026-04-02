@@ -79,6 +79,42 @@ class StoryLlmMergeTests(unittest.TestCase):
                 [{"name": "Li Ming", "role": "lead", "description": "updated"}],
             )
 
+
+class StoryOutlineValidationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generate_outline_rejects_incomplete_outline_payload(self):
+        async def fake_stream():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content='{"meta":{"episodes":6},"outline":[{"episode":1,"title":"第一集","summary":"摘要","beats":["Beat 1"],"scene_list":["Scene 1"]}]}'))]
+            )
+
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream()))
+            )
+        )
+        save_story = AsyncMock()
+        invalidate_cache = AsyncMock()
+
+        with (
+            patch("app.services.story_llm._make_client", return_value=fake_client),
+            patch("app.services.story_llm.repo.save_story", new=save_story),
+            patch("app.services.story_llm.repo.invalidate_story_consistency_cache", new=invalidate_cache),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await generate_outline(
+                    "story-invalid-outline",
+                    selected_setting="新的世界观设定",
+                    db=object(),
+                    api_key="fake-key",
+                    provider="qwen",
+                    model="qwen-max",
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 502)
+        self.assertIn("outline 无效", exc_info.exception.detail)
+        save_story.assert_not_awaited()
+        invalidate_cache.assert_not_awaited()
+
     def test_build_apply_chat_history_text_keeps_only_relevant_ai_signal(self):
         history_text = _build_apply_chat_history_text(
             "character",
@@ -326,6 +362,62 @@ class StoryMainlineFlowTests(unittest.IsolatedAsyncioTestCase):
                 "description": "更新后的角色描述",
             },
         )
+
+    async def test_apply_chat_logs_safe_warning_when_json_parsing_fails(self):
+        async with self.session_factory() as session:
+            await repo.save_story(
+                session,
+                "story-apply-chat-parse-error",
+                {
+                    "idea": "test",
+                    "characters": [
+                        {
+                            "id": "char_hero",
+                            "name": "林晓雨",
+                            "role": "女主角",
+                            "description": "原始描述",
+                        },
+                    ],
+                },
+            )
+
+            response = SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="not-json-response"))],
+                usage=None,
+            )
+            fake_client = SimpleNamespace(
+                chat=SimpleNamespace(
+                    completions=SimpleNamespace(create=AsyncMock(return_value=response))
+                )
+            )
+
+            with (
+                patch("app.services.story_llm._make_client", return_value=fake_client),
+                patch("app.services.story_llm.logger.warning") as warning_mock,
+                patch("builtins.print") as print_mock,
+            ):
+                result = await apply_chat(
+                    "story-apply-chat-parse-error",
+                    "character",
+                    chat_history=[],
+                    current_item={
+                        "id": "char_hero",
+                        "name": "林晓雨",
+                        "role": "女主角",
+                        "description": "原始描述",
+                    },
+                    db=session,
+                    api_key="fake-key",
+                )
+
+        self.assertEqual(result, {})
+        print_mock.assert_not_called()
+        warning_mock.assert_called_once()
+        self.assertIn("Apply chat response JSON parsing failed", warning_mock.call_args.args[0])
+        self.assertEqual(warning_mock.call_args.args[1], "story-apply-chat-parse-error")
+        self.assertEqual(warning_mock.call_args.args[2], "character")
+        self.assertEqual(warning_mock.call_args.args[3], "JSONDecodeError")
+        self.assertEqual(warning_mock.call_args.args[4], len("not-json-response"))
 
     async def test_apply_chat_episode_updates_full_outline_fields(self):
         async with self.session_factory() as session:

@@ -16,6 +16,7 @@ from app.prompts.story import (
     OUTLINE_PROMPT, SCRIPT_PROMPT, REFINE_PROMPT,
     build_apply_chat_prompt, build_chat_messages,
 )
+from app.services.llm.telemetry import LLMCallTracker, estimate_request_chars, normalize_usage
 
 MODEL_MAP = {
     "qwen": "qwen-plus",
@@ -328,6 +329,137 @@ def _get_model(provider: str, model: str = "") -> str:
     return model or MODEL_MAP.get(provider, "qwen-plus")
 
 
+def _telemetry_provider(provider: str) -> str:
+    normalized = str(provider or "").strip()
+    return normalized or "openai-compatible"
+
+
+def _build_llm_tracker(
+    *,
+    operation: str,
+    provider: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    story_id: str = "",
+    extra: Optional[dict[str, Any]] = None,
+) -> LLMCallTracker:
+    context: dict[str, Any] = {"operation": operation}
+    if story_id:
+        context["story_id"] = story_id
+    if extra:
+        for key, value in extra.items():
+            if value is None:
+                continue
+            normalized = str(value).strip() if isinstance(value, str) else value
+            if normalized == "":
+                continue
+            context[key] = normalized
+    return LLMCallTracker(
+        provider=_telemetry_provider(provider),
+        model=model,
+        request_chars=estimate_request_chars(messages=messages),
+        context=context,
+    )
+
+
+def _usage_dict(usage: Any) -> dict[str, int] | None:
+    if usage is None:
+        return None
+    normalized = normalize_usage(usage)
+    return {
+        "prompt_tokens": normalized.get("prompt_tokens", 0),
+        "completion_tokens": normalized.get("completion_tokens", 0),
+    }
+
+
+EXPECTED_OUTLINE_EPISODES = (1, 2, 3, 4, 5, 6)
+
+
+def _normalize_required_outline_text(value: Any, *, field_name: str, episode_number: int) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ValueError(f"第 {episode_number} 集缺少有效的 {field_name}")
+    return normalized
+
+
+def _normalize_required_outline_text_list(value: Any, *, field_name: str, episode_number: int) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"第 {episode_number} 集缺少有效的 {field_name}")
+
+    normalized_items: list[str] = []
+    for item in value:
+        normalized = str(item or "").strip()
+        if not normalized:
+            raise ValueError(f"第 {episode_number} 集的 {field_name} 包含空条目")
+        normalized_items.append(normalized)
+    return normalized_items
+
+
+def _validate_generated_outline_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("返回结果必须是 JSON 对象")
+
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        raise ValueError("meta 必须存在且为对象")
+
+    if _normalize_episode_number(meta.get("episodes")) != len(EXPECTED_OUTLINE_EPISODES):
+        raise ValueError("meta.episodes 必须等于 6")
+
+    outline = payload.get("outline")
+    if not isinstance(outline, list):
+        raise ValueError("outline 必须存在且为数组")
+    if len(outline) != len(EXPECTED_OUTLINE_EPISODES):
+        raise ValueError("outline 必须完整包含 6 集")
+
+    normalized_outline: list[dict[str, Any]] = []
+    returned_episodes: list[int] = []
+    for entry in outline:
+        if not isinstance(entry, dict):
+            raise ValueError("outline 中的每一项都必须是对象")
+
+        episode_number = _normalize_episode_number(entry.get("episode"))
+        if episode_number is None:
+            raise ValueError("outline 中存在缺少 episode 的条目")
+
+        normalized_entry = {
+            **entry,
+            "episode": episode_number,
+            "title": _normalize_required_outline_text(
+                entry.get("title"),
+                field_name="title",
+                episode_number=episode_number,
+            ),
+            "summary": _normalize_required_outline_text(
+                entry.get("summary"),
+                field_name="summary",
+                episode_number=episode_number,
+            ),
+            "beats": _normalize_required_outline_text_list(
+                entry.get("beats"),
+                field_name="beats",
+                episode_number=episode_number,
+            ),
+            "scene_list": _normalize_required_outline_text_list(
+                entry.get("scene_list"),
+                field_name="scene_list",
+                episode_number=episode_number,
+            ),
+        }
+        normalized_outline.append(normalized_entry)
+        returned_episodes.append(episode_number)
+
+    expected_episodes = list(EXPECTED_OUTLINE_EPISODES)
+    if returned_episodes != expected_episodes:
+        raise ValueError("outline.episode 必须按 1, 2, 3, 4, 5, 6 连续返回")
+
+    return {
+        **payload,
+        "meta": {**meta, "episodes": len(EXPECTED_OUTLINE_EPISODES)},
+        "outline": normalized_outline,
+    }
+
+
 def _parse_json(content: str):
     import json as _json
     content = content.strip()
@@ -354,15 +486,31 @@ async def refine(story_id: str, change_type: str, change_summary: str, db: Async
         change_type=change_type,
         change_summary=change_summary,
     )
-    resp = await client.chat.completions.create(
-        model=_get_model(provider, model),
-        messages=[{"role": "user", "content": prompt}],
+    resolved_model = _get_model(provider, model)
+    messages = [{"role": "user", "content": prompt}]
+    tracker = _build_llm_tracker(
+        operation="story.refine",
+        provider=provider,
+        model=resolved_model,
+        messages=messages,
+        story_id=story_id,
+        extra={"change_type": change_type},
     )
     try:
-        data = _parse_json(resp.choices[0].message.content)
-    except Exception:
+        resp = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+        )
+    except Exception as exc:
+        tracker.record_failure(exc)
+        raise
+    response_text = resp.choices[0].message.content
+    usage = getattr(resp, "usage", None)
+    try:
+        data = _parse_json(response_text)
+    except Exception as exc:
+        tracker.record_failure(exc, usage=usage, response_text=response_text)
         return {"characters": None, "relationships": None, "outline": None, "meta_theme": None}
-    usage = resp.usage
 
     # 写回数据库，保持 DB 与前端状态同步
     updates = {}
@@ -374,45 +522,52 @@ async def refine(story_id: str, change_type: str, change_summary: str, db: Async
             )
             updates["characters"] = _merge_characters(list(story.get("characters") or []), sanitized_characters)
     except ValueError as exc:
+        tracker.record_failure(exc, usage=usage, response_text=response_text)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    if data.get("relationships") is not None:
-        updates["relationships"] = data["relationships"]
-    if data.get("outline") is not None:
-        existing_outline = list(story.get("outline") or [])
-        normalized_outline = [
-            _normalize_episode_outline_payload(
-                episode,
-                fallback_episode=_find_outline_episode(existing_outline, episode.get("episode")) if isinstance(episode, dict) else None,
-            )
-            for episode in list(data["outline"] or [])
-            if isinstance(episode, dict)
-        ]
-        updates["outline"] = _merge_outline(existing_outline, normalized_outline)
-    if data.get("meta_theme") is not None:
-        existing_meta = story.get("meta") or {}
-        updates["meta"] = {**existing_meta, "theme": data["meta_theme"]}
-    latest_story = story
-    if updates:
-        if "characters" in updates or "outline" in updates:
-            updates["scenes"] = []
-        await repo.save_story(db, story_id, updates)
-        invalidate_appearance = "characters" in updates
-        invalidate_scene_style = "outline" in updates
-        if invalidate_appearance or invalidate_scene_style:
-            await repo.invalidate_story_consistency_cache(
-                db,
-                story_id,
-                appearance=invalidate_appearance,
-                scene_style=invalidate_scene_style,
-            )
-        latest_story = await repo.get_story(db, story_id)
+    try:
+        if data.get("relationships") is not None:
+            updates["relationships"] = data["relationships"]
+        if data.get("outline") is not None:
+            existing_outline = list(story.get("outline") or [])
+            normalized_outline = [
+                _normalize_episode_outline_payload(
+                    episode,
+                    fallback_episode=_find_outline_episode(existing_outline, episode.get("episode")) if isinstance(episode, dict) else None,
+                )
+                for episode in list(data["outline"] or [])
+                if isinstance(episode, dict)
+            ]
+            updates["outline"] = _merge_outline(existing_outline, normalized_outline)
+        if data.get("meta_theme") is not None:
+            existing_meta = story.get("meta") or {}
+            updates["meta"] = {**existing_meta, "theme": data["meta_theme"]}
+        latest_story = story
+        if updates:
+            if "characters" in updates or "outline" in updates:
+                updates["scenes"] = []
+            await repo.save_story(db, story_id, updates)
+            invalidate_appearance = "characters" in updates
+            invalidate_scene_style = "outline" in updates
+            if invalidate_appearance or invalidate_scene_style:
+                await repo.invalidate_story_consistency_cache(
+                    db,
+                    story_id,
+                    appearance=invalidate_appearance,
+                    scene_style=invalidate_scene_style,
+                )
+            latest_story = await repo.get_story(db, story_id)
+    except Exception as exc:
+        tracker.record_failure(exc, usage=usage, response_text=response_text)
+        raise
+
+    tracker.record_success(usage=usage, response_text=response_text)
 
     return {
         "characters": latest_story.get("characters") if data.get("characters") is not None else None,
         "relationships": latest_story.get("relationships") if data.get("relationships") is not None else None,
         "outline": latest_story.get("outline") if data.get("outline") is not None else None,
         "meta_theme": data.get("meta_theme"),
-        "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else None,
+        "usage": _usage_dict(usage),
     }
 
 
@@ -420,24 +575,41 @@ async def analyze_idea(idea: str, genre: str, tone: str, db: AsyncSession, api_k
     if _should_use_dev_mock(api_key, "灵感分析"):
         return await mock_analyze_idea(idea, genre, tone, db=db)
 
-    import json as _json
     import uuid
     client = _make_client(api_key, base_url)
     prompt = ANALYZE_PROMPT.format(idea=idea, genre=genre, tone=tone)
-    resp = await client.chat.completions.create(
-        model=_get_model(provider, model),
-        messages=[{"role": "user", "content": prompt}],
+    resolved_model = _get_model(provider, model)
+    messages = [{"role": "user", "content": prompt}]
+    tracker = _build_llm_tracker(
+        operation="story.analyze_idea",
+        provider=provider,
+        model=resolved_model,
+        messages=messages,
     )
-    data = _parse_json(resp.choices[0].message.content)
+    try:
+        resp = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+        )
+    except Exception as exc:
+        tracker.record_failure(exc)
+        raise
+    response_text = resp.choices[0].message.content
     story_id = str(uuid.uuid4())
-    await repo.save_story(db, story_id, {"idea": idea, "genre": genre, "tone": tone})
-    usage = resp.usage
+    usage = getattr(resp, "usage", None)
+    try:
+        data = _parse_json(response_text)
+        await repo.save_story(db, story_id, {"idea": idea, "genre": genre, "tone": tone})
+    except Exception as exc:
+        tracker.record_failure(exc, usage=usage, response_text=response_text)
+        raise
+    tracker.record_success(usage=usage, response_text=response_text)
     return {
         "story_id": story_id,
         "analysis": data.get("analysis", ""),
         "suggestions": data.get("suggestions", []),
         "placeholder": data.get("placeholder", ""),
-        "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else None,
+        "usage": _usage_dict(usage),
     }
 
 
@@ -447,29 +619,60 @@ async def generate_outline(story_id: str, selected_setting: str, db: AsyncSessio
 
     client = _make_client(api_key, base_url)
     prompt = OUTLINE_PROMPT.format(selected_setting=selected_setting)
-    # Stream to prevent ReadError on slow LLM responses
-    stream = await client.chat.completions.create(
-        model=_get_model(provider, model),
-        messages=[{"role": "user", "content": prompt}],
-        stream=True,
+    resolved_model = _get_model(provider, model)
+    messages = [{"role": "user", "content": prompt}]
+    tracker = _build_llm_tracker(
+        operation="story.generate_outline",
+        provider=provider,
+        model=resolved_model,
+        messages=messages,
+        story_id=story_id,
     )
+    # Outline generation is streamed to avoid long single-response reads timing out.
+    try:
+        stream = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            stream=True,
+        )
+    except Exception as exc:
+        tracker.record_failure(exc)
+        raise
     chunks = []
-    async for chunk in stream:
-        delta = chunk.choices[0].delta.content
-        if delta:
-            chunks.append(delta)
+    try:
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                tracker.mark_first_token()
+                chunks.append(delta)
+    except Exception as exc:
+        tracker.record_failure(exc, response_text="".join(chunks))
+        raise
     content = "".join(chunks)
-    data = _parse_json(content)
-    await repo.save_story(db, story_id, {
-        "selected_setting": selected_setting,
-        "meta": data.get("meta"),
-        "characters": data.get("characters", []),
-        "relationships": data.get("relationships", []),
-        "outline": data.get("outline", []),
-        "scenes": [],
-    })
-    await repo.invalidate_story_consistency_cache(db, story_id, appearance=True, scene_style=True)
-    latest_story = await repo.get_story(db, story_id)
+    try:
+        data = _parse_json(content)
+        validated_data = _validate_generated_outline_payload(data)
+        await repo.save_story(db, story_id, {
+            "selected_setting": selected_setting,
+            "meta": validated_data.get("meta"),
+            "characters": validated_data.get("characters", []),
+            "relationships": validated_data.get("relationships", []),
+            "outline": validated_data.get("outline", []),
+            "scenes": [],
+        })
+        await repo.invalidate_story_consistency_cache(db, story_id, appearance=True, scene_style=True)
+        latest_story = await repo.get_story(db, story_id)
+    except ValueError as exc:
+        tracker.record_failure(exc, response_text=content)
+        raise HTTPException(
+            status_code=502,
+            detail=f"大纲生成失败：模型返回的 outline 无效，{exc}",
+        ) from exc
+    except Exception as exc:
+        tracker.record_failure(exc, response_text=content)
+        raise
+
+    tracker.record_success(response_text=content)
     return {
         "story_id": story_id,
         "meta": latest_story.get("meta"),
@@ -497,15 +700,38 @@ async def chat(
         return
 
     client = _make_client(api_key, base_url)
-    stream = await client.chat.completions.create(
-        model=_get_model(provider, model),
-        messages=build_chat_messages(mode, message, context),
-        stream=True,
+    resolved_model = _get_model(provider, model)
+    messages = build_chat_messages(mode, message, context)
+    tracker = _build_llm_tracker(
+        operation="story.chat",
+        provider=provider,
+        model=resolved_model,
+        messages=messages,
+        story_id=story_id,
+        extra={"mode": mode},
     )
-    async for chunk in stream:
-        delta = chunk.choices[0].delta.content
-        if delta:
-            yield delta
+    try:
+        stream = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            stream=True,
+        )
+    except Exception as exc:
+        tracker.record_failure(exc)
+        raise
+
+    chunks: list[str] = []
+    try:
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                tracker.mark_first_token()
+                chunks.append(delta)
+                yield delta
+    except Exception as exc:
+        tracker.record_failure(exc, response_text="".join(chunks))
+        raise
+    tracker.record_success(response_text="".join(chunks))
 
 
 async def generate_script(story_id: str, db: AsyncSession, api_key: str = "", base_url: str = "", provider: str = "", model: str = ""):
@@ -549,14 +775,24 @@ async def generate_script(story_id: str, db: AsyncSession, api_key: str = "", ba
             ),
         )
         resolved_model = _get_model(provider, model)
+        messages = [{"role": "user", "content": prompt}]
+        tracker = _build_llm_tracker(
+            operation="story.generate_script_episode",
+            provider=provider,
+            model=resolved_model,
+            messages=messages,
+            story_id=story_id,
+            extra={"episode": ep.get("episode")},
+        )
         try:
             stream = await client.chat.completions.create(
                 model=resolved_model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 stream=True,
                 stream_options={"include_usage": True},
             )
         except Exception as exc:
+            tracker.record_failure(exc)
             resolved_base_url = base_url or "(default)"
             logger.exception(
                 "Script generation request failed story_id=%s episode=%s provider=%s model=%s base_url=%s",
@@ -572,22 +808,59 @@ async def generate_script(story_id: str, db: AsyncSession, api_key: str = "", ba
             ) from exc
 
         chunks = []
-        async for chunk in stream:
-            choices = getattr(chunk, "choices", None) or []
-            if choices:
-                delta = getattr(choices[0].delta, "content", None)
-                if delta:
-                    chunks.append(delta)
-            usage = getattr(chunk, "usage", None)
-            if usage:
-                total_prompt += getattr(usage, "prompt_tokens", 0) or 0
-                total_completion += getattr(usage, "completion_tokens", 0) or 0
+        episode_prompt_tokens = 0
+        episode_completion_tokens = 0
+        try:
+            async for chunk in stream:
+                choices = getattr(chunk, "choices", None) or []
+                if choices:
+                    delta = getattr(choices[0].delta, "content", None)
+                    if delta:
+                        # First content delta is the best approximation of user-visible model latency.
+                        tracker.mark_first_token()
+                        chunks.append(delta)
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+                    episode_prompt_tokens += prompt_tokens
+                    episode_completion_tokens += completion_tokens
+                    total_prompt += prompt_tokens
+                    total_completion += completion_tokens
+        except Exception as exc:
+            tracker.record_failure(
+                exc,
+                usage={
+                    "prompt_tokens": episode_prompt_tokens,
+                    "completion_tokens": episode_completion_tokens,
+                },
+                response_text="".join(chunks),
+            )
+            raise
 
         content = "".join(chunks)
         try:
-            yield _parse_json(content)
-        except Exception:
+            parsed_episode = _parse_json(content)
+        except Exception as exc:
+            tracker.record_failure(
+                exc,
+                usage={
+                    "prompt_tokens": episode_prompt_tokens,
+                    "completion_tokens": episode_completion_tokens,
+                },
+                response_text=content,
+            )
             yield {"episode": ep["episode"], "title": ep["title"], "scenes": []}
+            continue
+
+        tracker.record_success(
+            usage={
+                "prompt_tokens": episode_prompt_tokens,
+                "completion_tokens": episode_completion_tokens,
+            },
+            response_text=content,
+        )
+        yield parsed_episode
 
     yield {"__usage__": {"prompt_tokens": total_prompt, "completion_tokens": total_completion}}
 
@@ -603,21 +876,39 @@ async def world_building_start(idea: str, db: AsyncSession, api_key: str = "", b
         {"role": "system", "content": WB_SYSTEM_PROMPT},
         {"role": "user", "content": WB_USER_TEMPLATE.format(idea=idea)},
     ]
-    resp = await client.chat.completions.create(
-        model=_get_model(provider, model),
+    resolved_model = _get_model(provider, model)
+    tracker = _build_llm_tracker(
+        operation="story.world_building_start",
+        provider=provider,
+        model=resolved_model,
         messages=messages,
+        story_id=story_id,
     )
-    data = _parse_json(resp.choices[0].message.content)
-    messages.append({"role": "assistant", "content": resp.choices[0].message.content})
-    await repo.save_story(db, story_id, {"idea": idea, "wb_history": messages, "wb_turn": 1})
-    usage = resp.usage
+    try:
+        resp = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+        )
+    except Exception as exc:
+        tracker.record_failure(exc)
+        raise
+    response_text = resp.choices[0].message.content
+    usage = getattr(resp, "usage", None)
+    try:
+        data = _parse_json(response_text)
+        messages.append({"role": "assistant", "content": response_text})
+        await repo.save_story(db, story_id, {"idea": idea, "wb_history": messages, "wb_turn": 1})
+    except Exception as exc:
+        tracker.record_failure(exc, usage=usage, response_text=response_text)
+        raise
+    tracker.record_success(usage=usage, response_text=response_text)
     return {
         "story_id": story_id,
         "status": data.get("status", "questioning"),
         "turn": 1,
         "question": _ensure_world_building_question_options(data.get("question")),
         "world_summary": data.get("world_summary"),
-        "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else None,
+        "usage": _usage_dict(usage),
     }
 
 
@@ -631,27 +922,46 @@ async def world_building_turn(story_id: str, answer: str, db: AsyncSession, api_
 
     history = history + [{"role": "user", "content": answer}]
     client = _make_client(api_key, base_url)
-    resp = await client.chat.completions.create(
-        model=_get_model(provider, model),
+    resolved_model = _get_model(provider, model)
+    tracker = _build_llm_tracker(
+        operation="story.world_building_turn",
+        provider=provider,
+        model=resolved_model,
         messages=history,
+        story_id=story_id,
+        extra={"turn": turn},
     )
-    data = _parse_json(resp.choices[0].message.content)
-    history = history + [{"role": "assistant", "content": resp.choices[0].message.content}]
-    new_turn = turn + 1
-    updates = {"wb_history": history, "wb_turn": new_turn}
-    if data.get("status") == "complete":
-        updates["selected_setting"] = data.get("world_summary", "")
-    await repo.save_story(db, story_id, updates)
-    if data.get("status") == "complete":
-        await repo.invalidate_story_consistency_cache(db, story_id, scene_style=True)
-    usage = resp.usage
+    try:
+        resp = await client.chat.completions.create(
+            model=resolved_model,
+            messages=history,
+        )
+    except Exception as exc:
+        tracker.record_failure(exc)
+        raise
+    response_text = resp.choices[0].message.content
+    usage = getattr(resp, "usage", None)
+    try:
+        data = _parse_json(response_text)
+        history = history + [{"role": "assistant", "content": response_text}]
+        new_turn = turn + 1
+        updates = {"wb_history": history, "wb_turn": new_turn}
+        if data.get("status") == "complete":
+            updates["selected_setting"] = data.get("world_summary", "")
+        await repo.save_story(db, story_id, updates)
+        if data.get("status") == "complete":
+            await repo.invalidate_story_consistency_cache(db, story_id, scene_style=True)
+    except Exception as exc:
+        tracker.record_failure(exc, usage=usage, response_text=response_text)
+        raise
+    tracker.record_success(usage=usage, response_text=response_text)
     return {
         "story_id": story_id,
         "status": data.get("status", "questioning"),
         "turn": new_turn,
         "question": _ensure_world_building_question_options(data.get("question")),
         "world_summary": data.get("world_summary"),
-        "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else None,
+        "usage": _usage_dict(usage),
     }
 
 async def apply_chat(story_id: str, change_type: str, chat_history: list, current_item: dict,
@@ -668,55 +978,85 @@ async def apply_chat(story_id: str, change_type: str, chat_history: list, curren
     history_text = _build_apply_chat_history_text(change_type, chat_history)
     prompt = build_apply_chat_prompt(change_type, authoritative_item, history_text)
 
-    resp = await client.chat.completions.create(
-        model=_get_model(provider, model),
-        messages=[{"role": "user", "content": prompt}],
+    resolved_model = _get_model(provider, model)
+    messages = [{"role": "user", "content": prompt}]
+    tracker = _build_llm_tracker(
+        operation="story.apply_chat",
+        provider=provider,
+        model=resolved_model,
+        messages=messages,
+        story_id=story_id,
+        extra={"change_type": change_type},
     )
     try:
-        data = _parse_json(resp.choices[0].message.content)
+        resp = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+        )
+    except Exception as exc:
+        tracker.record_failure(exc)
+        raise
+    response_text = resp.choices[0].message.content
+    usage = getattr(resp, "usage", None)
+    try:
+        data = _parse_json(response_text)
     except Exception as e:
-        print(f"[APPLY_CHAT] JSON 解析失败: {e!r} | 原始响应: {resp.choices[0].message.content!r:.500}")
+        tracker.record_failure(e, usage=usage, response_text=response_text)
+        logger.warning(
+            "Apply chat response JSON parsing failed story_id=%s change_type=%s error_type=%s response_chars=%s",
+            story_id,
+            change_type,
+            type(e).__name__,
+            len(str(response_text or "")),
+        )
         return {}
 
-    if change_type == "character":
-        characters = list(story.get("characters") or [])
-        current_id = str(authoritative_item.get("id", "")).strip()
-        updated_character = None
-        for c in characters:
-            if current_id and str(c.get("id", "")).strip() == current_id:
-                c["description"] = data.get("description", c.get("description", ""))
-                updated_character = dict(c)
-                break
-            if not current_id and c.get("name") == authoritative_item.get("name"):
-                c["description"] = data.get("description", c.get("description", ""))
-                updated_character = dict(c)
-                break
-        if characters:
-            await repo.save_story(db, story_id, {"characters": characters, "scenes": []})
-            await repo.invalidate_story_consistency_cache(db, story_id, appearance=True)
-        if updated_character is not None:
-            return {
-                "name": updated_character.get("name", authoritative_item.get("name", "")),
-                "role": updated_character.get("role", authoritative_item.get("role", "")),
-                "description": updated_character.get("description", authoritative_item.get("description", "")),
-            }
-    else:
-        outline = list(story.get("outline") or [])
-        current_episode_number = _normalize_episode_number(authoritative_item.get("episode"))
-        updated_episode = None
-        for ep in outline:
-            if _normalize_episode_number(ep.get("episode")) == current_episode_number:
-                ep.update(_normalize_episode_outline_payload(data, fallback_episode=ep))
-                updated_episode = dict(ep)
-                break
-        if outline:
-            await repo.save_story(
-                db,
-                story_id,
-                {"outline": outline, "meta": dict(story.get("meta") or {}), "scenes": []},
-            )
-            await repo.invalidate_story_consistency_cache(db, story_id, scene_style=True)
-        if updated_episode is not None:
-            return updated_episode
+    try:
+        if change_type == "character":
+            characters = list(story.get("characters") or [])
+            current_id = str(authoritative_item.get("id", "")).strip()
+            updated_character = None
+            for c in characters:
+                if current_id and str(c.get("id", "")).strip() == current_id:
+                    c["description"] = data.get("description", c.get("description", ""))
+                    updated_character = dict(c)
+                    break
+                if not current_id and c.get("name") == authoritative_item.get("name"):
+                    c["description"] = data.get("description", c.get("description", ""))
+                    updated_character = dict(c)
+                    break
+            if characters:
+                await repo.save_story(db, story_id, {"characters": characters, "scenes": []})
+                await repo.invalidate_story_consistency_cache(db, story_id, appearance=True)
+            if updated_character is not None:
+                tracker.record_success(usage=usage, response_text=response_text)
+                return {
+                    "name": updated_character.get("name", authoritative_item.get("name", "")),
+                    "role": updated_character.get("role", authoritative_item.get("role", "")),
+                    "description": updated_character.get("description", authoritative_item.get("description", "")),
+                }
+        else:
+            outline = list(story.get("outline") or [])
+            current_episode_number = _normalize_episode_number(authoritative_item.get("episode"))
+            updated_episode = None
+            for ep in outline:
+                if _normalize_episode_number(ep.get("episode")) == current_episode_number:
+                    ep.update(_normalize_episode_outline_payload(data, fallback_episode=ep))
+                    updated_episode = dict(ep)
+                    break
+            if outline:
+                await repo.save_story(
+                    db,
+                    story_id,
+                    {"outline": outline, "meta": dict(story.get("meta") or {}), "scenes": []},
+                )
+                await repo.invalidate_story_consistency_cache(db, story_id, scene_style=True)
+            if updated_episode is not None:
+                tracker.record_success(usage=usage, response_text=response_text)
+                return updated_episode
+    except Exception as exc:
+        tracker.record_failure(exc, usage=usage, response_text=response_text)
+        raise
 
+    tracker.record_success(usage=usage, response_text=response_text)
     return data

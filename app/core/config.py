@@ -1,11 +1,21 @@
+import logging
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_LLM_SLOW_LOG_THRESHOLD_MS = 5000
 
 
 class Settings(BaseSettings):
     app_name: str = "AutoMedia API"
     database_url: str = "sqlite+aiosqlite:///./automedia.db"
     debug: bool = True
+    #表示是否开启 LLM 调用遥测/监控功能，默认为 True。开启后会记录 LLM 调用的性能数据（如响应时间、错误率等），以便进行分析和优化。关闭后则不收集这些数据，适合开发环境或对性能监控要求不高的场景。
+    llm_telemetry_enabled: bool = True
+    llm_slow_log_threshold_ms: int = DEFAULT_LLM_SLOW_LOG_THRESHOLD_MS
 
     # LLM
     default_llm_provider: str = "claude"
@@ -82,6 +92,25 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_provider(cls, value):
         return str(value or "").strip().lower()
+
+    @field_validator("llm_slow_log_threshold_ms", mode="before")
+    @classmethod
+    def _normalize_llm_slow_log_threshold_ms(cls, value):
+        try:
+            threshold = int(value)
+        except (TypeError, ValueError) as exc:
+            logger.error("Invalid LLM slow log threshold value=%r; expected an integer", value)
+            raise ValueError("llm_slow_log_threshold_ms must be an integer >= 0") from exc
+
+        if threshold < 0:
+            logger.warning(
+                "Invalid negative llm_slow_log_threshold_ms=%s; falling back to default=%s",
+                threshold,
+                DEFAULT_LLM_SLOW_LOG_THRESHOLD_MS,
+            )
+            return DEFAULT_LLM_SLOW_LOG_THRESHOLD_MS
+
+        return threshold
 
     class Config:
         env_file = ".env"

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from typing import Any, Dict, List, Literal, Optional
 
 
@@ -36,8 +36,8 @@ class OutlineScene(BaseModel):
     episode: int
     title: str
     summary: str
-    beats: Optional[List[str]] = None
-    scene_list: Optional[List[str]] = None
+    beats: List[str] = Field(min_length=1)
+    scene_list: List[str] = Field(min_length=1)
 
 
 class Relationship(BaseModel):
