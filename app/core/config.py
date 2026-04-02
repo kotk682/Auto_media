@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     app_name: str = "AutoMedia API"
     database_url: str = "sqlite+aiosqlite:///./automedia.db"
     debug: bool = True
+    #表示是否开启 LLM 调用遥测/监控功能，默认为 True。开启后会记录 LLM 调用的性能数据（如响应时间、错误率等），以便进行分析和优化。关闭后则不收集这些数据，适合开发环境或对性能监控要求不高的场景。
+    llm_telemetry_enabled: bool = True
+    llm_slow_log_threshold_ms: int = 5000
 
     # LLM
     default_llm_provider: str = "claude"

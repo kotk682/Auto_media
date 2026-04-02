@@ -1,35 +1,62 @@
 import anthropic
 from app.services.llm.base import BaseLLMProvider, estimate_tokens
+from app.services.llm.telemetry import LLMCallTracker, estimate_request_chars
 
 class ClaudeProvider(BaseLLMProvider):
+    provider_name = "claude"
+
     def __init__(self, api_key: str, base_url: str = "https://api.anthropic.com", model: str = "claude-sonnet-4-6"):
         self._client = anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
         self._model = model
 
-    async def complete(self, system: str, user: str, temperature: float = 0.3) -> str:
-        msg = await self._client.messages.create(
+    async def complete(self, system: str, user: str, temperature: float = 0.3, telemetry_context=None) -> str:
+        tracker = LLMCallTracker(
+            provider=self.provider_name,
             model=self._model,
-            max_tokens=4096,
-            temperature=temperature,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+            request_chars=estimate_request_chars(system=system, user=user),
+            context=telemetry_context,
         )
-        return msg.content[0].text
+        try:
+            msg = await self._client.messages.create(
+                model=self._model,
+                max_tokens=4096,
+                temperature=temperature,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+        except Exception as exc:
+            tracker.record_failure(exc)
+            raise
+        text = msg.content[0].text
+        tracker.record_success(usage=getattr(msg, "usage", None), response_text=text)
+        return text
 
-    async def complete_with_usage(self, system: str, user: str, temperature: float = 0.3) -> tuple[str, dict]:
-        msg = await self._client.messages.create(
+    async def complete_with_usage(self, system: str, user: str, temperature: float = 0.3, telemetry_context=None) -> tuple[str, dict]:
+        tracker = LLMCallTracker(
+            provider=self.provider_name,
             model=self._model,
-            max_tokens=4096,
-            temperature=temperature,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+            request_chars=estimate_request_chars(system=system, user=user),
+            context=telemetry_context,
         )
+        try:
+            msg = await self._client.messages.create(
+                model=self._model,
+                max_tokens=4096,
+                temperature=temperature,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+        except Exception as exc:
+            tracker.record_failure(exc)
+            raise
         usage_obj = getattr(msg, "usage", None)
         usage = {
             "prompt_tokens": usage_obj.input_tokens if usage_obj else 0,
             "completion_tokens": usage_obj.output_tokens if usage_obj else 0,
         }
-        return msg.content[0].text, usage
+        text = msg.content[0].text
+        tracker.record_success(usage=usage, response_text=text)
+        return text, usage
 
     @staticmethod
     def _message_blocks(content, *, cacheable: bool = False) -> list[dict]:
@@ -66,6 +93,7 @@ class ClaudeProvider(BaseLLMProvider):
         enable_caching: bool = False,
         cache_key: str = "",
         cache_threshold_tokens: int = 1024,
+        telemetry_context=None,
     ) -> tuple[str, dict]:
         del cache_key
         stable_token_budget = 0
@@ -89,17 +117,29 @@ class ClaudeProvider(BaseLLMProvider):
                 }
             )
 
-        msg = await self._client.messages.create(
+        tracker = LLMCallTracker(
+            provider=self.provider_name,
             model=self._model,
-            max_tokens=4096,
-            temperature=temperature,
-            system=system,
-            messages=request_messages,
+            request_chars=estimate_request_chars(system=system, messages=messages),
+            context=telemetry_context,
         )
+        try:
+            msg = await self._client.messages.create(
+                model=self._model,
+                max_tokens=4096,
+                temperature=temperature,
+                system=system,
+                messages=request_messages,
+            )
+        except Exception as exc:
+            tracker.record_failure(exc, extra={"cache_enabled": use_caching})
+            raise
         usage_obj = getattr(msg, "usage", None)
         usage = {
             "prompt_tokens": usage_obj.input_tokens if usage_obj else 0,
             "completion_tokens": usage_obj.output_tokens if usage_obj else 0,
             "cache_enabled": use_caching,
         }
-        return msg.content[0].text, usage
+        text = msg.content[0].text
+        tracker.record_success(usage=usage, response_text=text)
+        return text, usage

@@ -277,6 +277,10 @@ async def extract_character_appearance(
         ],
         temperature=0.1,
         enable_caching=True,
+        telemetry_context={
+            "operation": "story_context.extract_character_appearance",
+            "story_id": str(story.get("id", "")).strip(),
+        },
     )
     data = _parse_json(raw)
     parsed = data.get("characters") or []
@@ -340,6 +344,10 @@ async def extract_scene_style_cache(
         ],
         temperature=0.1,
         enable_caching=True,
+        telemetry_context={
+            "operation": "story_context.extract_scene_style_cache",
+            "story_id": str(story.get("id", "")).strip(),
+        },
     )
     data = _parse_json(raw)
     styles = data.get("styles") or []

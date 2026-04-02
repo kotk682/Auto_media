@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from abc import ABC, abstractmethod
-from typing import Any, Iterable, Optional, Tuple
+from typing import Any, Iterable, Mapping, Tuple
 
 
 logger = logging.getLogger(__name__)
@@ -37,13 +37,23 @@ class BaseLLMProvider(ABC):
     """Abstract base for all LLM providers."""
 
     @abstractmethod
-    async def complete(self, system: str, user: str, temperature: float = 0.3) -> str:
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        temperature: float = 0.3,
+        telemetry_context: Mapping[str, Any] | None = None,
+    ) -> str:
         """Send a prompt and return the text response."""
         ...
 
     @abstractmethod
     async def complete_with_usage(
-        self, system: str, user: str, temperature: float = 0.3
+        self,
+        system: str,
+        user: str,
+        temperature: float = 0.3,
+        telemetry_context: Mapping[str, Any] | None = None,
     ) -> Tuple[str, dict]:
         """
         Send a prompt and return both text response and usage information.
@@ -61,6 +71,7 @@ class BaseLLMProvider(ABC):
         enable_caching: bool = False,
         cache_key: str = "",
         cache_threshold_tokens: int = 1024,
+        telemetry_context: Mapping[str, Any] | None = None,
     ) -> str:
         text, _ = await self.complete_messages_with_usage(
             messages=messages,
@@ -69,6 +80,7 @@ class BaseLLMProvider(ABC):
             enable_caching=enable_caching,
             cache_key=cache_key,
             cache_threshold_tokens=cache_threshold_tokens,
+            telemetry_context=telemetry_context,
         )
         return text
 
@@ -80,6 +92,7 @@ class BaseLLMProvider(ABC):
         enable_caching: bool = False,
         cache_key: str = "",
         cache_threshold_tokens: int = 1024,
+        telemetry_context: Mapping[str, Any] | None = None,
     ) -> Tuple[str, dict]:
         del enable_caching, cache_key, cache_threshold_tokens
         if not messages:
@@ -98,4 +111,9 @@ class BaseLLMProvider(ABC):
                 for message in messages
                 if _message_text(message)
             )
-        return await self.complete_with_usage(system, user, temperature)
+        return await self.complete_with_usage(
+            system,
+            user,
+            temperature,
+            telemetry_context=telemetry_context,
+        )

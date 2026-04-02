@@ -816,6 +816,11 @@ async def generate_storyboard(
             base_url=script_llm["base_url"],
             character_info=character_info,
             character_section_override=story_context.clean_character_section if story_context else None,
+            telemetry_context={
+                "story_id": tracking_story_id,
+                "pipeline_id": pipeline_id,
+                "project_id": project_id,
+            },
         )
     except Exception as exc:
         logger.exception(

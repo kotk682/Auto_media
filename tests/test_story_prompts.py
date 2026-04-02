@@ -28,6 +28,13 @@ class StoryPromptTests(unittest.TestCase):
         self.assertIn("`summary` 只写剧情逻辑，不写对白，不写镜头语言，不写摄影机运动", OUTLINE_PROMPT)
         self.assertIn("`scene_list` 中相同地点应尽量使用同一命名", OUTLINE_PROMPT)
 
+    def test_outline_prompt_requires_full_six_episode_outline(self):
+        self.assertIn("`meta.episodes` 固定为 6", OUTLINE_PROMPT)
+        self.assertIn("`outline` 必须且只能包含 6 个对象", OUTLINE_PROMPT)
+        self.assertIn("1, 2, 3, 4, 5, 6 连续返回", OUTLINE_PROMPT)
+        self.assertIn("禁止只返回第 1 集作为示例", OUTLINE_PROMPT)
+        self.assertIn("`outline` 必须完整写出第 1 集到第 6 集的全部内容", OUTLINE_PROMPT)
+
     def test_apply_chat_character_prompt_rejects_forensic_style_micro_details(self):
         prompt = build_apply_chat_prompt(
             "character",
