@@ -308,13 +308,19 @@ export async function streamChat(storyId, messageOrPayload, onChunk, onDone, onE
   onDone()
 }
 
-export async function streamScript(storyId, onScene, onDone, onError, signal) {
+export async function streamScript(storyId, onScene, onDone, onError, signal, options = {}) {
   let res
+  const requestBody = {
+    story_id: storyId,
+  }
+  if (Number.isInteger(options.resumeFromEpisode)) {
+    requestBody.resume_from_episode = options.resumeFromEpisode
+  }
   try {
     res = await fetch(getUrl('/generate-script'), {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ story_id: storyId }),
+      body: JSON.stringify(requestBody),
       signal,
     })
   } catch (e) {

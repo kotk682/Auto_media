@@ -7,6 +7,7 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 from app.core.config import settings
+from app.schemas.story import SceneScript
 from app.services import story_repository as repo
 from app.services.story_mock import (
     MOCK_WB_QUESTIONS,
@@ -1215,15 +1216,35 @@ async def chat(
     tracker.record_success(response_text="".join(chunks))
 
 
-async def generate_script(story_id: str, db: AsyncSession, api_key: str = "", base_url: str = "", provider: str = "", model: str = ""):
+async def generate_script(
+    story_id: str,
+    db: AsyncSession,
+    api_key: str = "",
+    base_url: str = "",
+    provider: str = "",
+    model: str = "",
+    resume_from_episode: int | None = None,
+):
     story = await repo.get_story(db, story_id)
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
     outline = story.get("outline", [])
     if not outline:
         raise HTTPException(status_code=400, detail="剧本生成失败：当前故事缺少大纲，请先完成世界观与大纲生成")
+    if resume_from_episode is not None:
+        outline = [
+            episode
+            for episode in outline
+            if (_normalize_episode_number(episode.get("episode")) or 0) >= resume_from_episode
+        ]
+        if not outline:
+            raise HTTPException(status_code=400, detail="续生成失败：指定的起始集数不在当前大纲范围内")
     if _should_use_dev_mock(api_key, "剧本生成"):
         async for scene in mock_generate_script(story_id):
+            if resume_from_episode is not None:
+                episode_number = _normalize_episode_number(scene.get("episode"))
+                if episode_number is None or episode_number < resume_from_episode:
+                    continue
             yield scene
         return
     characters = story.get("characters", [])
@@ -1319,15 +1340,18 @@ async def generate_script(story_id: str, db: AsyncSession, api_key: str = "", ba
         }
         try:
             parsed_episode = _parse_json(content)
+            validated_episode = SceneScript.model_validate(parsed_episode)
+            normalized_episode = validated_episode.model_dump()
+            normalized_episode["episode"] = ep["episode"]
+            normalized_episode["title"] = normalized_episode.get("title") or ep["title"]
+            if not normalized_episode.get("scenes"):
+                raise ValueError(f"第 {ep['episode']} 集未返回有效场景")
         except Exception as exc:
             tracker.record_failure(exc, usage=usage, response_text=content)
-            return {
-                "scene": {"episode": ep["episode"], "title": ep["title"], "scenes": []},
-                "usage": usage,
-            }
+            raise RuntimeError(f"第 {ep['episode']} 集返回结构无效，请重试") from exc
 
         tracker.record_success(usage=usage, response_text=content)
-        return {"scene": parsed_episode, "usage": usage}
+        return {"scene": normalized_episode, "usage": usage}
 
     running_tasks: dict[int, asyncio.Task] = {}
     task_to_index: dict[asyncio.Task, int] = {}

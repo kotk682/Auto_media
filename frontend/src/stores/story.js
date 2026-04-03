@@ -2,6 +2,14 @@ import { defineStore } from 'pinia'
 import { findCharacterByRef, getCharacterKey } from '../utils/character.js'
 import { hasCompleteGeneratedScript } from '../utils/scriptValidation.js'
 
+function normalizeEpisodeNumber(value) {
+  if (value == null) return null
+  const normalized = String(value).trim()
+  if (!normalized) return null
+  const parsed = Number.parseInt(normalized, 10)
+  return Number.isInteger(parsed) ? parsed : null
+}
+
 export function getSceneKey(episode, sceneNumber) {
   return `ep${String(episode).padStart(2, '0')}_scene${String(sceneNumber).padStart(2, '0')}`
 }
@@ -299,9 +307,47 @@ export const useStoryStore = defineStore('story', {
         this.usage.prompt_tokens += scene.__usage__.prompt_tokens
         this.usage.completion_tokens += scene.__usage__.completion_tokens
       } else {
-        this.scenes.push(scene)
+        const episodeNumber = normalizeEpisodeNumber(scene?.episode)
+        const existingIndex = episodeNumber == null
+          ? -1
+          : this.scenes.findIndex(item => normalizeEpisodeNumber(item?.episode) === episodeNumber)
+
+        if (existingIndex >= 0) {
+          this.scenes.splice(existingIndex, 1, scene)
+        } else {
+          this.scenes.push(scene)
+        }
+        this.scenes.sort((left, right) => {
+          const leftEpisode = normalizeEpisodeNumber(left?.episode) ?? Number.MAX_SAFE_INTEGER
+          const rightEpisode = normalizeEpisodeNumber(right?.episode) ?? Number.MAX_SAFE_INTEGER
+          return leftEpisode - rightEpisode
+        })
         this.ensureSceneReferenceAssets()
       }
+    },
+    retainScenesBeforeEpisode(startEpisode) {
+      const normalizedStartEpisode = normalizeEpisodeNumber(startEpisode)
+      if (normalizedStartEpisode == null) return
+
+      this.scenes = this.scenes.filter(episode => {
+        const episodeNumber = normalizeEpisodeNumber(episode?.episode)
+        return episodeNumber != null && episodeNumber < normalizedStartEpisode
+      })
+      this.clearShots()
+      this.sceneReferenceAssets = {}
+      if (this.meta && typeof this.meta === 'object') {
+        this.meta = {
+          ...this.meta,
+          scene_reference_assets: {},
+          episode_reference_assets: {},
+        }
+      }
+      this.step3Done = false
+      this.clearManualPipelineContext({
+        keepProjectId: this.storyId || '',
+        keepStoryId: this.storyId || '',
+      })
+      this.ensureSceneReferenceAssets()
     },
     resetScenes() {
       this.invalidateGeneratedScript({

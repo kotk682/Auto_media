@@ -65,6 +65,7 @@ class ChatRequest(BaseModel):
 
 class GenerateScriptRequest(BaseModel):
     story_id: str
+    resume_from_episode: Optional[int] = Field(default=None, ge=1)
 
 
 class StoryboardScriptRequest(BaseModel):

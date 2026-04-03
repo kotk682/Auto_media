@@ -73,6 +73,56 @@ def _build_incomplete_script_detail(outline: list[dict], scenes: list[dict]) -> 
     return "剧本生成失败：当前故事缺少大纲或返回结果结构无效，请重试"
 
 
+def _get_outline_episode_numbers(outline: list[dict]) -> list[int]:
+    episode_numbers: list[int] = []
+    for episode in outline:
+        if not isinstance(episode, dict):
+            continue
+        episode_number = _normalize_episode_number(episode.get("episode"))
+        if episode_number is None:
+            continue
+        episode_numbers.append(episode_number)
+    return episode_numbers
+
+
+def _get_ordered_script_scenes(
+    outline: list[dict],
+    scenes: list[dict],
+    *,
+    before_episode: int | None = None,
+) -> list[dict]:
+    scene_map: dict[int, dict] = {}
+    for episode in scenes or []:
+        if not isinstance(episode, dict):
+            continue
+        episode_number = _normalize_episode_number(episode.get("episode"))
+        if episode_number is None:
+            continue
+        if before_episode is not None and episode_number >= before_episode:
+            continue
+        matched_scenes = episode.get("scenes")
+        if not isinstance(matched_scenes, list) or len(matched_scenes) == 0:
+            continue
+        if episode_number in scene_map:
+            continue
+        scene_map[episode_number] = deepcopy(episode)
+
+    ordered_scenes: list[dict] = []
+    for episode_number in _get_outline_episode_numbers(outline):
+        scene = scene_map.get(episode_number)
+        if scene is not None:
+            ordered_scenes.append(scene)
+    return ordered_scenes
+
+
+def _build_script_generation_meta(meta: dict | None) -> dict:
+    next_meta = deepcopy(meta) if isinstance(meta, dict) else {}
+    next_meta["scene_reference_assets"] = {}
+    next_meta["episode_reference_assets"] = {}
+    next_meta["storyboard_generation"] = {}
+    return next_meta
+
+
 class SceneReferenceGenerateRequest(BaseModel):
     episode: int
     force_regenerate: bool = False
@@ -161,7 +211,8 @@ async def api_generate_script(req: GenerateScriptRequest, request: Request, llm:
     story_record = await repo.get_story(db, req.story_id)
     if not story_record:
         raise HTTPException(status_code=404, detail="故事不存在")
-    if not story_record.get("outline", []):
+    outline = story_record.get("outline", [])
+    if not outline:
         raise HTTPException(status_code=400, detail="剧本生成失败：当前故事缺少大纲，请先完成世界观与大纲生成")
     if not script_api_key and not settings.debug:
         raise HTTPException(
@@ -169,31 +220,68 @@ async def api_generate_script(req: GenerateScriptRequest, request: Request, llm:
             detail="剧本生成 需要可用的 LLM API Key，请在前端设置或后端 .env 中完成配置",
         )
 
+    resume_from_episode = req.resume_from_episode
+    existing_scenes = story_record.get("scenes", [])
+    outline_episode_numbers = _get_outline_episode_numbers(outline)
+    if resume_from_episode is not None:
+        if resume_from_episode not in outline_episode_numbers:
+            raise HTTPException(status_code=400, detail="续生成失败：指定的起始集数不在当前大纲范围内")
+
+        incomplete_before_resume = [
+            episode
+            for episode in _get_incomplete_script_episodes(outline, existing_scenes)
+            if episode < resume_from_episode
+        ]
+        if incomplete_before_resume:
+            raise HTTPException(
+                status_code=400,
+                detail=f"续生成失败：{_format_episode_list(incomplete_before_resume)} 尚未完成，无法从第 {resume_from_episode} 集继续",
+            )
+
+    persisted_scenes = _get_ordered_script_scenes(
+        outline,
+        existing_scenes,
+        before_episode=resume_from_episode,
+    ) if resume_from_episode is not None else []
+    await repo.save_story(
+        db,
+        req.story_id,
+        {
+            "scenes": deepcopy(persisted_scenes),
+            "meta": _build_script_generation_meta(story_record.get("meta") or {}),
+        },
+    )
+
     async def event_stream():
-        scenes = []
         success = False
         try:
-            async for scene in generate_script(req.story_id, db=db, **script_llm):
+            async for scene in generate_script(
+                req.story_id,
+                db=db,
+                resume_from_episode=resume_from_episode,
+                **script_llm,
+            ):
                 if "__usage__" not in scene:
-                    scenes.append(scene)
+                    persisted_scenes.append(deepcopy(scene))
+                    await repo.save_story(db, req.story_id, {"scenes": deepcopy(persisted_scenes)})
                     yield f"data: {json.dumps(scene, ensure_ascii=False)}\n\n"
                 else:
                     yield f"data: {json.dumps(scene, ensure_ascii=False)}\n\n"
             success = True
         except Exception as e:
             logger.exception(
-                "Generate script failed story_id=%s provider=%s model=%s",
+                "Generate script failed story_id=%s provider=%s model=%s resume_from_episode=%s",
                 req.story_id,
                 script_llm.get("provider", ""),
                 script_llm.get("model", ""),
+                resume_from_episode,
             )
             yield f"data: [ERROR] {str(e)}\n\n"
+            return
         if success:
-            outline = story_record.get("outline", [])
-            if not _has_complete_script(outline, scenes):
-                yield f"data: [ERROR] {_build_incomplete_script_detail(outline, scenes)}\n\n"
+            if not _has_complete_script(outline, persisted_scenes):
+                yield f"data: [ERROR] {_build_incomplete_script_detail(outline, persisted_scenes)}\n\n"
                 return
-            await repo.save_story(db, req.story_id, {"scenes": scenes})
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

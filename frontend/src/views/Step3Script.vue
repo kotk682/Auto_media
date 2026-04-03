@@ -32,14 +32,46 @@
         </div>
       </div>
 
-      <button
-        v-if="canGenerate"
-        class="generate-btn"
-        :disabled="!store.meta"
-        @click="startGenerate"
+      <div v-if="showResumeActionRow" class="generate-action-row">
+        <button
+          class="continue-btn"
+          type="button"
+          :disabled="!store.meta || nextIncompleteEpisode == null"
+          :title="resumeButtonHint"
+          @click="startContinueGenerate"
+        >
+          {{ continueButtonLabel }}
+        </button>
+        <button
+          class="generate-btn generate-btn-secondary"
+          :disabled="!store.meta"
+          @click="startGenerate"
+        >
+          重新生成全部 ✨
+        </button>
+      </div>
+
+      <div
+        v-else-if="canGenerate"
+        class="generate-btn-wrapper"
       >
-        {{ generateButtonLabel }}
-      </button>
+        <button
+          class="generate-btn"
+          :disabled="!store.meta"
+          @click="startGenerate"
+        >
+          {{ generateButtonLabel }}
+        </button>
+      </div>
+
+      <div
+        v-if="showResumeActionRow"
+        class="resume-hint"
+        role="status"
+        aria-live="polite"
+      >
+        {{ resumeButtonHint }}
+      </div>
 
       <div v-if="error && !streaming && !hasSceneOutput" class="error-tip" role="alert" aria-live="assertive">{{ error }}</div>
 
@@ -69,11 +101,11 @@
         <div v-if="error" class="error-tip" role="alert" aria-live="assertive">{{ error }}</div>
         <div
           v-else-if="showIncompleteScriptTip"
-          class="error-tip"
-          role="alert"
-          aria-live="assertive"
-        >
-          当前剧本不完整，请重新生成。
+        class="error-tip"
+        role="alert"
+        aria-live="assertive"
+      >
+          {{ showResumeActionRow ? '当前剧本不完整，可继续生成或重新生成全部。' : '当前剧本不完整，请重新生成。' }}
         </div>
       </div>
 
@@ -105,14 +137,12 @@ import ApiKeyModal from '../components/ApiKeyModal.vue'
 import OutlineChatPanel from '../components/OutlineChatPanel.vue'
 import ArtStyleSelector from '../components/ArtStyleSelector.vue'
 import { useStoryStore } from '../stores/story.js'
-import { useSettingsStore } from '../stores/settings.js'
 import { streamScript } from '../api/story.js'
 import { canAccessStep, getStepRedirectPath } from '../utils/stepAccess.js'
-import { cloneSerializable, formatEpisodeList, getIncompleteScriptEpisodes, hasCompleteGeneratedScript } from '../utils/scriptValidation.js'
+import { formatEpisodeList, getIncompleteScriptEpisodes, hasCompleteGeneratedScript } from '../utils/scriptValidation.js'
 
 const router = useRouter()
 const store = useStoryStore()
-const settings = useSettingsStore()
 const streaming = ref(false)
 const error = ref('')
 const chatOpen = ref(false)
@@ -122,13 +152,49 @@ const keyModalMsg = ref('')
 const currentEpisodeIndex = ref(0)
 const userPinnedEpisode = ref(false)
 const hasSceneOutput = computed(() => store.scenes.length > 0)
+const generatedEpisodeNumbers = computed(() => store.scenes
+  .filter(episode => Array.isArray(episode?.scenes) && episode.scenes.length > 0)
+  .map(episode => {
+    const parsed = Number.parseInt(String(episode?.episode ?? '').trim(), 10)
+    return Number.isInteger(parsed) ? parsed : null
+  })
+  .filter(episode => episode != null)
+  .sort((left, right) => left - right))
+const lastGeneratedEpisode = computed(() => (
+  generatedEpisodeNumbers.value.length > 0
+    ? generatedEpisodeNumbers.value[generatedEpisodeNumbers.value.length - 1]
+    : null
+))
 const hasValidScript = computed(() => hasCompleteGeneratedScript({
   outline: store.outline,
   scenes: store.scenes,
 }))
+const incompleteEpisodes = computed(() => getIncompleteScriptEpisodes({
+  outline: store.outline,
+  scenes: store.scenes,
+}))
+const nextIncompleteEpisode = computed(() => incompleteEpisodes.value[0] ?? null)
 const done = computed(() => store.step3Done && hasValidScript.value)
 const canGenerate = computed(() => !streaming.value)
 const generateButtonLabel = computed(() => (hasSceneOutput.value ? '重新生成剧本 ✨' : '开始生成剧本 ✨'))
+const showResumeActionRow = computed(() => (
+  canGenerate.value
+  && hasSceneOutput.value
+  && !hasValidScript.value
+  && nextIncompleteEpisode.value != null
+))
+const continueButtonLabel = computed(() => (
+  nextIncompleteEpisode.value != null
+    ? `继续生成（第 ${nextIncompleteEpisode.value} 集起）`
+    : '继续生成'
+))
+const resumeButtonHint = computed(() => (
+  nextIncompleteEpisode.value != null
+    ? lastGeneratedEpisode.value != null
+      ? `当前已保留到第 ${lastGeneratedEpisode.value} 集，可从第 ${nextIncompleteEpisode.value} 集继续生成；如需全部重做，也可以重新生成全部。`
+      : `当前剧本在第 ${nextIncompleteEpisode.value} 集中断，可从该集继续生成。`
+    : '当前剧本不完整，可继续生成或重新生成全部。'
+))
 const showIncompleteScriptTip = computed(() => (
   !streaming.value
   && hasSceneOutput.value
@@ -178,101 +244,73 @@ function isAuthError(msg) {
   return /401|403|invalid|incorrect|unauthorized|api.?key/i.test(msg)
 }
 
-function captureScriptSnapshot() {
-  const hasValidScript = hasCompleteGeneratedScript({
-    outline: store.outline,
-    scenes: store.scenes,
-  })
-
-  return {
-    hasValidScript,
-    scenes: cloneSerializable(store.scenes, []),
-    meta: cloneSerializable(store.meta, null),
-    sceneReferenceAssets: cloneSerializable(store.sceneReferenceAssets, {}),
-    shots: cloneSerializable(store.shots, []),
-    storyboardFinalVideoUrl: store.storyboardFinalVideoUrl || '',
-    manualProjectId: store.manualProjectId || '',
-    manualPipelineId: store.manualPipelineId || '',
-    manualStoryId: store.manualStoryId || '',
+function buildResumeErrorHint() {
+  if (!store.scenes.length || nextIncompleteEpisode.value == null) return ''
+  if (lastGeneratedEpisode.value != null) {
+    return `已保留到第 ${lastGeneratedEpisode.value} 集，可从第 ${nextIncompleteEpisode.value} 集继续生成`
   }
+  return `已保留已成功集数，可从第 ${nextIncompleteEpisode.value} 集继续生成`
 }
 
-function rollbackScriptGeneration(snapshot, message) {
-  if (snapshot?.hasValidScript) {
-    store.meta = cloneSerializable(snapshot.meta, null)
-    store.scenes = cloneSerializable(snapshot.scenes, [])
-    store.sceneReferenceAssets = cloneSerializable(snapshot.sceneReferenceAssets, {})
-    store.setShots(cloneSerializable(snapshot.shots, []))
-    store.setStoryboardFinalVideoUrl(snapshot.storyboardFinalVideoUrl || '')
-    store.setManualPipelineContext({
-      projectId: snapshot.manualProjectId || '',
-      pipelineId: snapshot.manualPipelineId || '',
-      storyId: snapshot.manualStoryId || '',
-    })
-    store.step3Done = true
-    store.ensureSceneReferenceAssets()
-  } else {
-    store.resetScenes()
-    store.step3Done = false
-  }
-
+function setScriptGenerationError(message) {
   store.setStep(3)
-  error.value = message
+  store.step3Done = false
+  const normalizedMessage = String(message || '生成失败，请重试').trim()
+  const resumeHint = buildResumeErrorHint()
+  error.value = resumeHint ? `${normalizedMessage}，${resumeHint}` : normalizedMessage
 }
 
-async function startGenerate() {
+async function runGenerate({ resumeFromEpisode = null } = {}) {
   scriptAbortController?.abort()
   const controller = new AbortController()
   scriptAbortController = controller
-  const previousScriptSnapshot = captureScriptSnapshot()
-  const isOverwritingValidScript = previousScriptSnapshot.hasValidScript
+  const isResumeGeneration = Number.isInteger(resumeFromEpisode)
   streaming.value = true
   error.value = ''
-  currentEpisodeIndex.value = 0
   userPinnedEpisode.value = false
-  store.resetScenes()
+  store.setStep(3)
+  if (isResumeGeneration) {
+    store.retainScenesBeforeEpisode(resumeFromEpisode)
+    currentEpisodeIndex.value = Math.max(store.scenes.length - 1, 0)
+  } else {
+    currentEpisodeIndex.value = 0
+    store.resetScenes()
+  }
   try {
     await streamScript(
       store.storyId,
       (scene) => store.addScene(scene),
       () => {
-      const isCompleteScript = hasCompleteGeneratedScript({
-        outline: store.outline,
-        scenes: store.scenes,
-      })
-      if (!isCompleteScript) {
-        const incompleteEpisodes = getIncompleteScriptEpisodes({
+        const isCompleteScript = hasCompleteGeneratedScript({
           outline: store.outline,
           scenes: store.scenes,
         })
-        const suffix = isOverwritingValidScript ? '，已回滚到上一次有效结果' : ''
-        const message = incompleteEpisodes.length > 0
-          ? `剧本生成不完整：${formatEpisodeList(incompleteEpisodes)} 未生成有效场景${suffix}`
-          : `剧本生成失败：当前故事缺少大纲或返回结果结构无效，请重试${suffix}`
-        rollbackScriptGeneration(
-          previousScriptSnapshot,
-          message
-        )
-        return
-      }
-      store.step3Done = true
-      store.setStep(4)
+        if (!isCompleteScript) {
+          const incompleteEpisodes = getIncompleteScriptEpisodes({
+            outline: store.outline,
+            scenes: store.scenes,
+          })
+          const message = incompleteEpisodes.length > 0
+            ? `剧本生成不完整：${formatEpisodeList(incompleteEpisodes)} 未生成有效场景`
+            : '剧本生成失败：当前故事缺少大纲或返回结果结构无效，请重试'
+          setScriptGenerationError(message)
+          return
+        }
+        error.value = ''
+        store.step3Done = true
+        store.setStep(4)
       },
       (msg) => {
-      const normalizedMessage = msg || '生成失败，请重试'
-      rollbackScriptGeneration(
-        previousScriptSnapshot,
-        isOverwritingValidScript
-          ? `${normalizedMessage}，已回滚到上一次有效结果`
-          : normalizedMessage
-      )
-      if (isAuthError(msg)) {
-        keyModalType.value = 'invalid'
-        keyModalMsg.value = 'API Key 无效或已过期，请检查后重新设置。'
-        showKeyModal.value = true
-      }
-    },
-      controller.signal
+        const normalizedMessage = msg || '生成失败，请重试'
+        setScriptGenerationError(normalizedMessage)
+        if (isAuthError(msg)) {
+          keyModalType.value = 'invalid'
+          keyModalMsg.value = 'API Key 无效或已过期，请检查后重新设置。'
+          showKeyModal.value = true
+        }
+      },
+      controller.signal,
+      isResumeGeneration ? { resumeFromEpisode } : {}
     )
   } finally {
     streaming.value = false
@@ -280,6 +318,15 @@ async function startGenerate() {
       scriptAbortController = null
     }
   }
+}
+
+async function startGenerate() {
+  await runGenerate()
+}
+
+async function startContinueGenerate() {
+  if (nextIncompleteEpisode.value == null) return
+  await runGenerate({ resumeFromEpisode: nextIncompleteEpisode.value })
 }
 
 function goPrevEpisode() {
