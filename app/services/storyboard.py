@@ -1435,7 +1435,7 @@ async def parse_script_to_storyboard(
     Returns:
         tuple: (list of Shot objects, usage dict with prompt_tokens and completion_tokens)
     """
-    character_section = character_section_override or build_character_section(character_info)
+    character_section = character_section_override or build_character_section(character_info, script=script)
     scene_mapping = _build_scene_mapping(script)
     scene_mapping_section = _build_scene_mapping_section(script)
     llm = get_llm_provider(provider, model=model, api_key=api_key, base_url=base_url)

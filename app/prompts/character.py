@@ -10,6 +10,7 @@ from app.core.character_profile import (
     extract_character_visual_description,
     sanitize_character_profile_description,
 )
+from app.core.story_context import _safe_name_match
 
 
 # ============================================================================
@@ -64,7 +65,7 @@ def build_character_prompt(name: str, role: str, description: str, art_style: st
 # ============================================================================
 # 分镜角色参考信息块构建
 # ============================================================================
-def build_character_section(character_info: Optional[dict]) -> str:
+def build_character_section(character_info: Optional[dict], script: str = "") -> str:
     """构建传给分镜 LLM 的角色参考信息块。"""
     from app.core.story_context import build_character_reference_anchor
     from app.core.story_assets import get_character_appearance_cache_entry
@@ -79,6 +80,14 @@ def build_character_section(character_info: Optional[dict]) -> str:
         appearance_cache = meta.get("character_appearance_cache") if isinstance(meta.get("character_appearance_cache"), Mapping) else {}
     if not characters:
         return ""
+    if script:
+        matched_characters = [
+            character
+            for character in characters
+            if _safe_name_match(str(character.get("name", "")), script)
+        ]
+        if matched_characters:
+            characters = matched_characters
 
     lines = ["## Character Reference (maintain consistency across all shots)"]
     for c in characters:

@@ -24,7 +24,7 @@ from app.core.model_defaults import resolve_image_model, resolve_video_model
 from app.paths import MEDIA_DIR
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.pipeline_runtime import get_runtime_strategy_note, resolve_tracking_story_id
-from app.core.story_context import build_generation_payload
+from app.core.story_context import build_clean_character_section, build_generation_payload
 from app.schemas.pipeline import (
     AutoGenerateRequest,
     AutoGenerateResponse,
@@ -796,6 +796,7 @@ async def generate_storyboard(
 
     try:
         character_info = None
+        character_section_override = None
         load_context_started_at = perf_counter()
         story, story_context = await _load_story_context(
             db,
@@ -815,6 +816,12 @@ async def generate_storyboard(
                     "character_images": character_images or {},
                     "meta": story.get("meta") or {},
                 }
+                if story_context:
+                    character_section_override = build_clean_character_section(
+                        story_context.character_locks,
+                        characters,
+                        script=req.script,
+                    )
 
         parse_storyboard_started_at = perf_counter()
         shots, usage = await parse_script_to_storyboard(
@@ -824,7 +831,7 @@ async def generate_storyboard(
             api_key=script_llm["api_key"],
             base_url=script_llm["base_url"],
             character_info=character_info,
-            character_section_override=story_context.clean_character_section if story_context else None,
+            character_section_override=character_section_override,
             telemetry_context={
                 "story_id": tracking_story_id,
                 "pipeline_id": pipeline_id,

@@ -744,9 +744,17 @@ def _build_scene_styles(story: Mapping[str, Any]) -> list[SceneStyle]:
     return styles
 
 
-def build_clean_character_section(character_locks: dict[str, CharacterLock], characters: list[dict]) -> str:
+def build_clean_character_section(character_locks: dict[str, CharacterLock], characters: list[dict], script: str = "") -> str:
     if not characters:
         return ""
+    if script:
+        matched_characters = [
+            character
+            for character in characters
+            if _safe_name_match(str(character.get("name", "")), script)
+        ]
+        if matched_characters:
+            characters = matched_characters
 
     lines = ["## Character Reference (maintain exact physical consistency across all shots)"]
     for character in characters:

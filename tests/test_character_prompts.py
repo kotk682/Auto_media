@@ -199,6 +199,58 @@ class CharacterPromptTests(unittest.TestCase):
         self.assertIn("身形清瘦", section)
         self.assertIn("穿着深蓝长衫", section)
 
+    def test_build_character_section_filters_to_characters_mentioned_in_script(self):
+        section = build_character_section(
+            {
+                "characters": [
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发。"},  # noqa: RUF001
+                    {"id": "char_a_yue", "name": "阿月", "role": "配角", "description": "年轻女子，长发。"},  # noqa: RUF001
+                ],
+                "character_images": {
+                    "char_li_ming": {
+                        "visual_dna": "young man, short black hair",
+                        "character_id": "char_li_ming",
+                        "character_name": "李明",
+                    },
+                    "char_a_yue": {
+                        "visual_dna": "young woman, long hair",
+                        "character_id": "char_a_yue",
+                        "character_name": "阿月",
+                    },
+                },
+            },
+            script="【画面】李明站在门口，抬头看向屋内。",  # noqa: RUF001
+        )
+
+        self.assertIn("李明", section)
+        self.assertNotIn("阿月", section)
+
+    def test_build_character_section_keeps_all_characters_when_script_has_no_explicit_name(self):
+        section = build_character_section(
+            {
+                "characters": [
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发。"},  # noqa: RUF001
+                    {"id": "char_a_yue", "name": "阿月", "role": "配角", "description": "年轻女子，长发。"},  # noqa: RUF001
+                ],
+                "character_images": {
+                    "char_li_ming": {
+                        "visual_dna": "young man, short black hair",
+                        "character_id": "char_li_ming",
+                        "character_name": "李明",
+                    },
+                    "char_a_yue": {
+                        "visual_dna": "young woman, long hair",
+                        "character_id": "char_a_yue",
+                        "character_name": "阿月",
+                    },
+                },
+            },
+            script="【画面】他站在门口，她在屋内回头。",  # noqa: RUF001
+        )
+
+        self.assertIn("李明", section)
+        self.assertIn("阿月", section)
+
 
 if __name__ == "__main__":
     unittest.main()
