@@ -200,6 +200,40 @@ class ProviderPromptCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(usage["cache_enabled"])
         self.assertEqual(usage["cached_tokens"], 1400)
 
+    async def test_openai_provider_does_not_report_cache_enabled_when_request_has_no_prompt_cache_key(self):
+        provider = OpenAIProvider(
+            api_key="test-key",
+            model="gpt-4o",
+            base_url="https://example-proxy.invalid/v1",
+        )
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=SimpleNamespace(
+                prompt_tokens=1800,
+                completion_tokens=12,
+                prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+            ),
+        )
+        provider._client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=AsyncMock(return_value=response))
+            )
+        )
+
+        _, usage = await provider.complete_messages_with_usage(
+            system="system" * 400,
+            messages=[
+                {"role": "user", "content": "stable prefix " * 300, "cacheable": True},
+                {"role": "user", "content": "dynamic suffix"},
+            ],
+            enable_caching=True,
+            telemetry_context={"operation": "storyboard.parse"},
+        )
+
+        kwargs = provider._client.chat.completions.create.await_args.kwargs
+        self.assertIsNone(kwargs["extra_body"])
+        self.assertNotIn("cache_enabled", usage)
+
     async def test_qwen_provider_marks_cacheable_message_blocks_and_surfaces_cache_usage(self):
         provider = QwenProvider(api_key="test-key", model="qwen-plus")
 
@@ -243,6 +277,50 @@ class ProviderPromptCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(usage["cache_enabled"])
         self.assertEqual(usage["cached_tokens"], 1200)
         self.assertEqual(usage["cache_creation_input_tokens"], 100)
+
+    async def test_qwen_provider_does_not_report_cache_enabled_for_non_dashscope_endpoint(self):
+        provider = QwenProvider(
+            api_key="test-key",
+            model="qwen-plus",
+            base_url="https://example-proxy.invalid/v1",
+        )
+
+        async def stream():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="hello"))],
+                usage=None,
+            )
+            yield SimpleNamespace(
+                choices=[],
+                usage=SimpleNamespace(
+                    prompt_tokens=1700,
+                    completion_tokens=15,
+                    prompt_tokens_details=SimpleNamespace(
+                        cached_tokens=0,
+                        cache_creation_input_tokens=0,
+                    ),
+                ),
+            )
+
+        provider._client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=AsyncMock(return_value=stream()))
+            )
+        )
+
+        _, usage = await provider.complete_messages_with_usage(
+            system="system" * 400,
+            messages=[
+                {"role": "user", "content": "stable prefix " * 300, "cacheable": True},
+                {"role": "user", "content": "dynamic suffix"},
+            ],
+            enable_caching=True,
+            telemetry_context={"operation": "storyboard.parse"},
+        )
+
+        request_messages = provider._client.chat.completions.create.await_args.kwargs["messages"]
+        self.assertIsInstance(request_messages[1]["content"], str)
+        self.assertNotIn("cache_enabled", usage)
 
 
 class StoryLlmTelemetryIntegrationTests(unittest.IsolatedAsyncioTestCase):

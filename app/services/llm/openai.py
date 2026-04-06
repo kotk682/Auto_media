@@ -77,6 +77,7 @@ class OpenAIProvider(BaseLLMProvider):
             request_messages = [{"role": "system", "content": system}, *request_messages]
         stable_token_budget = estimate_cacheable_prefix_tokens(system=system, messages=messages)
         use_caching = enable_caching and stable_token_budget >= cache_threshold_tokens
+        prompt_cache_key = ""
         extra_body = None
         if use_caching and "api.openai.com" in str(self._base_url or ""):
             prompt_cache_key = build_cache_routing_key(
@@ -88,6 +89,7 @@ class OpenAIProvider(BaseLLMProvider):
             )
             if prompt_cache_key:
                 extra_body = {"prompt_cache_key": prompt_cache_key}
+        cache_enabled = bool(prompt_cache_key and extra_body and extra_body.get("prompt_cache_key"))
         tracker = LLMCallTracker(
             provider=self.provider_name,
             model=self._model,
@@ -102,11 +104,11 @@ class OpenAIProvider(BaseLLMProvider):
                 extra_body=extra_body,
             )
         except Exception as exc:
-            tracker.record_failure(exc, extra={"cache_enabled": use_caching})
+            tracker.record_failure(exc, extra={"cache_enabled": cache_enabled})
             raise
         usage_obj = getattr(resp, "usage", None)
         usage = normalize_usage(usage_obj)
-        if use_caching:
+        if cache_enabled:
             usage["cache_enabled"] = True
         text = resp.choices[0].message.content
         tracker.record_success(usage=usage, response_text=text)

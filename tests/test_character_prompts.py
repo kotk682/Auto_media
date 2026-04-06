@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001
 import unittest
 
 from app.prompts.character import build_character_prompt, build_character_section

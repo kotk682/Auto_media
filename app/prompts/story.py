@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ruff: noqa: RUF001
 """
 剧本生成全流程提示词模板（Step 1-3）
 

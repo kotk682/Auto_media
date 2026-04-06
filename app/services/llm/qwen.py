@@ -41,11 +41,14 @@ class QwenProvider(BaseLLMProvider):
         del cache_key
         stable_token_budget = estimate_cacheable_prefix_tokens(system=system, messages=messages)
         use_caching = enable_caching and stable_token_budget >= cache_threshold_tokens
+        supports_dashscope_cache = "dashscope" in str(self._base_url or "")
+        has_cacheable_message = any(bool(message.get("cacheable")) for message in messages)
+        request_cache_enabled = use_caching and supports_dashscope_cache and has_cacheable_message
 
         request_messages = []
         for message in messages:
             content = message.get("content", "")
-            if use_caching and bool(message.get("cacheable")) and "dashscope" in str(self._base_url or ""):
+            if request_cache_enabled and bool(message.get("cacheable")):
                 content = build_message_blocks(content, cacheable=True)
             request_messages.append(
                 {"role": message.get("role", "user"), "content": content}
@@ -95,7 +98,7 @@ class QwenProvider(BaseLLMProvider):
                     **normalize_usage(last_usage_obj),
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
-                    "cache_enabled": use_caching,
+                    "cache_enabled": request_cache_enabled,
                 },
                 response_text="".join(chunks),
             )
@@ -104,7 +107,7 @@ class QwenProvider(BaseLLMProvider):
         usage = normalize_usage(last_usage_obj)
         usage["prompt_tokens"] = prompt_tokens
         usage["completion_tokens"] = completion_tokens
-        if use_caching:
+        if request_cache_enabled:
             usage["cache_enabled"] = True
         text = "".join(chunks)
         tracker.record_success(usage=usage, response_text=text)

@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch

@@ -1018,6 +1018,145 @@ class ParseStoryboardOverrideTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(shots[0].audio_reference.speaker, "李明")
         self.assertEqual(shots[0].audio_reference.content, "别进去。")
 
+    async def test_parse_script_to_storyboard_preserves_duplicate_dialogue_content_speaker_match(self):
+        response = """
+        [
+          {
+            "shot_id": "scene1_shot1",
+            "characters": ["李明", "老板"],
+            "storyboard_description": "老板压低声音下令。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "老板与李明站在茶馆门口",
+              "action_and_expression": "老板侧头低声发话，李明立刻警觉",
+              "environment_and_props": "茶馆木门与灯笼",
+              "lighting_and_color": "暖色灯笼与阴天自然光"
+            },
+            "image_prompt": "老板和李明对峙在门口。",
+            "final_video_prompt": "老板压低声音说出命令，李明警惕抬眼。",
+            "audio_reference": {
+              "type": "dialogue",
+              "speaker": "老板",
+              "content": "快走。"
+            }
+          }
+        ]
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            shots, _ = await parse_script_to_storyboard(
+                "【环境】茶馆门口\n【李明】快走。\n【老板】快走。",
+                provider="openai",
+            )
+
+        self.assertEqual(len(shots), 1)
+        self.assertEqual(shots[0].audio_reference.type, "dialogue")
+        self.assertEqual(shots[0].audio_reference.speaker, "老板")
+        self.assertEqual(shots[0].audio_reference.content, "快走。")
+
+    async def test_parse_script_to_storyboard_preserves_valid_audio_after_core_shot_merge(self):
+        response = """
+        [
+          {
+            "shot_id": "scene1_shot1",
+            "characters": ["李明"],
+            "storyboard_description": "李明先观察前方。",
+            "scene_position": "establishing",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "李明站在茶馆门口",
+              "action_and_expression": "停步观察前方",
+              "environment_and_props": "茶馆木门与灯笼",
+              "lighting_and_color": "暖色灯笼与阴天自然光"
+            },
+            "image_prompt": "李明站在门口观察前方。",
+            "final_video_prompt": "李明停步后观察前方动静。",
+            "audio_reference": {
+              "type": "dialogue",
+              "speaker": "李明",
+              "content": "看前面。"
+            }
+          },
+          {
+            "shot_id": "scene1_shot2",
+            "characters": ["李明"],
+            "storyboard_description": "他压低声音催促同伴。",
+            "scene_position": "development",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "李明贴近门边",
+              "action_and_expression": "压低声音催促同伴",
+              "environment_and_props": "茶馆木门与灯笼",
+              "lighting_and_color": "暖色灯笼与阴天自然光"
+            },
+            "image_prompt": "李明贴近门边低声催促。",
+            "final_video_prompt": "李明贴近门边催促同伴先走。",
+            "audio_reference": {
+              "type": "dialogue",
+              "speaker": "李明",
+              "content": "先走。"
+            }
+          },
+          {
+            "shot_id": "scene1_shot3",
+            "characters": ["李明"],
+            "storyboard_description": "他再次下令，语气更急。",
+            "scene_position": "climax",
+            "scene_intensity": "high",
+            "camera_setup": {"shot_size": "MCU", "camera_angle": "Eye-level", "movement": "Slow Dolly in"},
+            "visual_elements": {
+              "subject_and_clothing": "李明站在茶馆门口",
+              "action_and_expression": "压低声音再次下令，神情更紧张",
+              "environment_and_props": "茶馆木门与灯笼",
+              "lighting_and_color": "暖色灯笼与阴天自然光"
+            },
+            "image_prompt": "李明神情紧张地再次下令。",
+            "final_video_prompt": "李明再次下令，语气更急。",
+            "audio_reference": {
+              "type": "dialogue",
+              "speaker": "李明",
+              "content": "快走。"
+            }
+          },
+          {
+            "shot_id": "scene1_shot4",
+            "characters": ["李明"],
+            "storyboard_description": "他回头确认身后动静。",
+            "scene_position": "resolution",
+            "camera_setup": {"shot_size": "CU", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "李明站在门口回头",
+              "action_and_expression": "回头确认身后动静",
+              "environment_and_props": "茶馆木门与灯笼",
+              "lighting_and_color": "暖色灯笼与阴天自然光"
+            },
+            "image_prompt": "李明回头确认身后。",
+            "final_video_prompt": "李明回头确认身后是否有人接近。"
+          }
+        ]
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            shots, _ = await parse_script_to_storyboard(
+                "【环境】茶馆门口\n【李明】看前面。\n【李明】先走。\n【李明】快走。",
+                provider="openai",
+            )
+
+        self.assertEqual(len(shots), 3)
+        self.assertEqual(shots[0].audio_reference.content, "看前面。")
+        self.assertEqual(shots[1].audio_reference.type, "dialogue")
+        self.assertEqual(shots[1].audio_reference.speaker, "李明")
+        self.assertIn("先走", shots[1].audio_reference.content)
+        self.assertIn("快走", shots[1].audio_reference.content)
+
     async def test_parse_script_to_storyboard_tolerates_minor_schema_drift(self):
         response = """
         {

@@ -735,8 +735,8 @@ def _build_script_audio_lookup(
     script: str,
     *,
     scene_mapping: Optional[dict[int, str]] = None,
-) -> dict[str, dict[str, dict[str, Any]]]:
-    allowed_audio: dict[str, dict[str, dict[str, Any]]] = {}
+) -> dict[str, dict[tuple[str, str, str | None], dict[str, Any]]]:
+    allowed_audio: dict[str, dict[tuple[str, str, str | None], dict[str, Any]]] = {}
     current_scene_key = "scene1"
     scene_index = 0
 
@@ -744,15 +744,15 @@ def _build_script_audio_lookup(
         content_key = _normalize_audio_content_key(content)
         if not content_key:
             return
+        normalized_type = _stringify_text(ref_type).lower()
+        normalized_speaker = _stringify_text(speaker) or None
+        bucket_key = (content_key, normalized_type, normalized_speaker)
         bucket = allowed_audio.setdefault(scene_key, {})
-        bucket.setdefault(
-            content_key,
-            {
-                "type": ref_type,
-                "speaker": speaker,
-                "content": _stringify_text(content),
-            },
-        )
+        bucket[bucket_key] = {
+            "type": normalized_type,
+            "speaker": normalized_speaker,
+            "content": _stringify_text(content),
+        }
 
     for raw_line in (script or "").splitlines():
         line = _collapse_spaces(raw_line)
@@ -805,7 +805,7 @@ def _filter_audio_reference_to_script(
     shot_id: str,
     source_scene_key: str | None,
     characters: list[str] | None = None,
-    allowed_audio_lookup: Optional[dict[str, dict[str, dict[str, Any]]]] = None,
+    allowed_audio_lookup: Optional[dict[str, dict[tuple[str, str, str | None], dict[str, Any]]]] = None,
 ) -> dict[str, Any] | None:
     normalized = _finalize_audio_reference(audio_reference, characters=characters)
     if not normalized:
@@ -816,9 +816,35 @@ def _filter_audio_reference_to_script(
         shot_match = re.match(r"scene(\d+)_shot", _collapse_spaces(shot_id), flags=re.IGNORECASE)
         scene_key = f"scene{shot_match.group(1)}" if shot_match else "scene1"
 
-    matched_audio = (allowed_audio_lookup or {}).get(scene_key, {}).get(
-        _normalize_audio_content_key(normalized.get("content"))
+    content_key = _normalize_audio_content_key(normalized.get("content"))
+    if not content_key:
+        return None
+
+    normalized_type = _stringify_text(normalized.get("type")).lower()
+    normalized_speaker = _stringify_text(normalized.get("speaker")) or None
+    scene_bucket = (allowed_audio_lookup or {}).get(scene_key, {})
+    scene_entries = list(reversed(list(scene_bucket.items())))
+    content_matches = [
+        entry
+        for (candidate_content_key, candidate_type, candidate_speaker), entry in scene_entries
+        if candidate_content_key == content_key
+        and (not normalized_type or candidate_type == normalized_type)
+    ]
+    if not content_matches:
+        return None
+
+    matched_audio = next(
+        (
+            entry
+            for (candidate_content_key, candidate_type, candidate_speaker), entry in scene_entries
+            if candidate_content_key == content_key
+            and (not normalized_type or candidate_type == normalized_type)
+            and candidate_speaker == normalized_speaker
+        ),
+        None,
     )
+    if not matched_audio and normalized_speaker is None and len(content_matches) == 1:
+        matched_audio = content_matches[0]
     if not matched_audio:
         return None
 
@@ -1546,13 +1572,21 @@ def _parse_shots(
     raw: str,
     *,
     scene_mapping: Optional[dict[int, str]] = None,
-    allowed_audio_lookup: Optional[dict[str, dict[str, dict[str, Any]]]] = None,
+    allowed_audio_lookup: Optional[dict[str, dict[tuple[str, str, str | None], dict[str, Any]]]] = None,
 ) -> List[Shot]:
     """解析 LLM 输出为 Shot 列表，兼容新旧两种 JSON 格式。"""
     data = [
         _normalize_shot_item(raw_item, shot_number=shot_number, scene_mapping=scene_mapping)
         for shot_number, raw_item in enumerate(_load_storyboard_items(raw), start=1)
     ]
+    for item in data:
+        item["audio_reference"] = _filter_audio_reference_to_script(
+            item.get("audio_reference") if isinstance(item.get("audio_reference"), Mapping) else None,
+            shot_id=_stringify_text(item.get("shot_id")),
+            source_scene_key=_stringify_text(item.get("source_scene_key")) or None,
+            characters=_normalize_character_mentions(item.get("characters")),
+            allowed_audio_lookup=allowed_audio_lookup,
+        )
     data = _limit_core_shot_items(data)
     scene_items: dict[str, list[dict[str, Any]]] = {}
     for item in data:
@@ -1564,18 +1598,7 @@ def _parse_shots(
 
     shots = []
     for scene_key, items in scene_items.items():
-        has_retained_audio = False
-        for item in items:
-            item["audio_reference"] = _filter_audio_reference_to_script(
-                item.get("audio_reference") if isinstance(item.get("audio_reference"), Mapping) else None,
-                shot_id=_stringify_text(item.get("shot_id")),
-                source_scene_key=_stringify_text(item.get("source_scene_key")) or None,
-                characters=_normalize_character_mentions(item.get("characters")),
-                allowed_audio_lookup=allowed_audio_lookup,
-            )
-            if item.get("audio_reference"):
-                has_retained_audio = True
-
+        has_retained_audio = any(item.get("audio_reference") for item in items)
         allowed_audio_items = list((allowed_audio_lookup or {}).get(scene_key, {}).values())
         if not has_retained_audio and len(allowed_audio_items) == 1:
             candidate_audio = allowed_audio_items[0]
