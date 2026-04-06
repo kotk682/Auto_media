@@ -10,6 +10,7 @@ _story_prompt_module = module_from_spec(_STORY_PROMPT_SPEC)
 _STORY_PROMPT_SPEC.loader.exec_module(_story_prompt_module)
 
 OUTLINE_PROMPT = _story_prompt_module.OUTLINE_PROMPT
+OUTLINE_BLUEPRINT_PROMPT = _story_prompt_module.OUTLINE_BLUEPRINT_PROMPT
 REFINE_PROMPT = _story_prompt_module.REFINE_PROMPT
 build_apply_chat_prompt = _story_prompt_module.build_apply_chat_prompt
 build_chat_messages = _story_prompt_module.build_chat_messages
@@ -34,6 +35,13 @@ class StoryPromptTests(unittest.TestCase):
         self.assertIn("1, 2, 3, 4, 5, 6 连续返回", OUTLINE_PROMPT)
         self.assertIn("禁止只返回第 1 集作为示例", OUTLINE_PROMPT)
         self.assertIn("`outline` 必须完整写出第 1 集到第 6 集的全部内容", OUTLINE_PROMPT)
+
+    def test_outline_prompts_define_stable_alias_rules(self):
+        self.assertIn('"aliases": ["稳定别名1", "稳定称谓1"]', OUTLINE_PROMPT)
+        self.assertIn("只有当角色会被稳定地用别名、称谓或中英文对照名指代时", OUTLINE_PROMPT)
+        self.assertIn("优先保留最常用的中文/英文对照名", OUTLINE_PROMPT)
+        self.assertIn('"aliases": ["稳定别名1", "稳定称谓1"]', OUTLINE_BLUEPRINT_PROMPT)
+        self.assertIn("不要写临时情绪称呼、一次性对白称呼、骂名或泛称", OUTLINE_BLUEPRINT_PROMPT)
 
     def test_apply_chat_character_prompt_rejects_forensic_style_micro_details(self):
         prompt = build_apply_chat_prompt(
@@ -95,6 +103,8 @@ class StoryPromptTests(unittest.TestCase):
         self.assertIn("必须同时返回该集完整的 title、summary、beats、scene_list 四个字段", REFINE_PROMPT)
         self.assertIn("beats 与 scene_list 必须同步到修改后的剧情", REFINE_PROMPT)
         self.assertIn('"outline": null 或 [{{"episode": 1, "title": "标题", "summary": "概要", "beats": ["Beat 1"], "scene_list": ["Scene 1: [夜] [室内] [地点] - 场景任务"]}}]', REFINE_PROMPT)
+        self.assertIn('"characters": null 或 [{{"id": "角色ID", "name": "角色名", "role": "角色定位", "description": "角色描述", "aliases": ["稳定别名1", "稳定称谓1"]}}]', REFINE_PROMPT)
+        self.assertIn("只有当稳定别名/称谓确实需要补充或修改时才更新 `aliases`", REFINE_PROMPT)
 
 
 if __name__ == "__main__":

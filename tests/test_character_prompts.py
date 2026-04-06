@@ -283,6 +283,43 @@ class CharacterPromptTests(unittest.TestCase):
         self.assertNotIn("李明", section)
         self.assertIn("阿月", section)
 
+    def test_build_character_section_filters_to_alias_mentioned_in_script(self):
+        section = build_character_section(
+            {
+                "characters": [
+                    {
+                        "id": "char_boss_zhao",
+                        "name": "Boss Zhao",
+                        "role": "support",
+                        "description": "middle-aged man, moustache.",
+                        "aliases": ["赵掌柜"],
+                    },
+                    {
+                        "id": "char_a_yue",
+                        "name": "A Yue",
+                        "role": "support",
+                        "description": "young woman, long hair.",
+                    },
+                ],
+                "character_images": {
+                    "char_boss_zhao": {
+                        "visual_dna": "middle-aged man, moustache, brown robe",
+                        "character_id": "char_boss_zhao",
+                        "character_name": "Boss Zhao",
+                    },
+                    "char_a_yue": {
+                        "visual_dna": "young woman, long hair",
+                        "character_id": "char_a_yue",
+                        "character_name": "A Yue",
+                    },
+                },
+            },
+            script="【画面】赵掌柜站在柜台后抬眼看向门口。",  # noqa: RUF001
+        )
+
+        self.assertIn("Boss Zhao / 赵掌柜", section)
+        self.assertNotIn("A Yue", section)
+
 
 if __name__ == "__main__":
     unittest.main()

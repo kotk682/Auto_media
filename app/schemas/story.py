@@ -30,6 +30,7 @@ class Character(BaseModel):
     name: str
     role: str
     description: str
+    aliases: List[str] = Field(default_factory=list)
 
 
 class OutlineScene(BaseModel):

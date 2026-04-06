@@ -41,12 +41,42 @@ def _normalize_cache_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
 
 def _coerce_character(record: Mapping[str, Any] | None) -> dict[str, Any]:
     data = dict(record or {})
-    return {
+    normalized = {
         "id": _normalize_text(data.get("id")),
         "name": _normalize_text(data.get("name")),
         "role": _normalize_text(data.get("role")),
         "description": sanitize_character_profile_description(_normalize_text(data.get("description"))),
     }
+    raw_aliases: list[Any] = []
+    aliases_value = data.get("aliases")
+    if isinstance(aliases_value, str):
+        raw_aliases.append(aliases_value)
+    elif isinstance(aliases_value, (list, tuple, set)):
+        raw_aliases.extend(list(aliases_value))
+
+    title_value = data.get("title")
+    if isinstance(title_value, str):
+        raw_aliases.append(title_value)
+
+    titles_value = data.get("titles")
+    if isinstance(titles_value, str):
+        raw_aliases.append(titles_value)
+    elif isinstance(titles_value, (list, tuple, set)):
+        raw_aliases.extend(list(titles_value))
+
+    aliases: list[str] = []
+    seen_aliases: set[str] = set()
+    canonical_name_key = _normalize_name_key(normalized.get("name"))
+    for raw_alias in raw_aliases:
+        alias = _normalize_text(raw_alias)
+        alias_key = _normalize_name_key(alias)
+        if not alias or not alias_key or alias_key == canonical_name_key or alias_key in seen_aliases:
+            continue
+        seen_aliases.add(alias_key)
+        aliases.append(alias)
+    if aliases:
+        normalized["aliases"] = aliases
+    return normalized
 
 
 def normalize_characters(

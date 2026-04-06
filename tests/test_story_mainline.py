@@ -623,6 +623,88 @@ class StoryMainlineFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["story_id"], "story-outline-clears-scenes")
         self.assertEqual(story["scenes"], [])
 
+    async def test_generate_outline_preserves_character_aliases_from_blueprint(self):
+        blueprint_response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=(
+                            '{"meta":{"title":"雨夜茶馆","genre":"古风","episodes":6,"theme":"命运相逢","logline":"李明雨夜送信时被迫卷入茶馆旧案","visual_tone":"克制冷雨与暖灯对照"},'
+                            '"characters":[{"name":"Boss Zhao","role":"support","description":"middle-aged shopkeeper, moustache, brown robe","aliases":["赵掌柜"]}],'
+                            '"relationships":[{"source":"Boss Zhao","target":"Li Ming","label":"guarded alliance"}],'
+                            '"season_plan":{"episode_arcs":['
+                            '{"episode":1,"arc":"雨夜送信建立人物与旧案钩子"},'
+                            '{"episode":2,"arc":"李明追查线索发现茶馆暗面"},'
+                            '{"episode":3,"arc":"赵掌柜被迫暴露更深秘密"},'
+                            '{"episode":4,"arc":"旧案真相逼近并反噬两人"},'
+                            '{"episode":5,"arc":"双方联手对抗幕后势力"},'
+                            '{"episode":6,"arc":"真相落定并完成关系收束"}'
+                            '],"location_glossary":["江南茶馆","后院"],"tone_rules":["克制","雨夜氛围"]}}'
+                        )
+                    )
+                )
+            ],
+            usage=None,
+        )
+        batch_response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=(
+                            '{"outline":['
+                            '{"episode":1,"title":"雨夜送信","summary":"李明雨夜抵达茶馆送信，卷入旧案开端。","beats":["送信到来","旧案钩子浮现"],"scene_list":["Scene 1: [夜] [室内] [江南茶馆] - 李明送信并发现异常。"]},'
+                            '{"episode":2,"title":"追查线索","summary":"李明顺着细节追查茶馆暗面。","beats":["怀疑升级","发现新线索"],"scene_list":["Scene 1: [夜] [室内] [江南茶馆] - 李明试探赵掌柜。"]},'
+                            '{"episode":3,"title":"秘密松动","summary":"赵掌柜被迫透露部分旧案真相。","beats":["互相试探","秘密松动"],"scene_list":["Scene 1: [夜] [室内] [后院] - 赵掌柜吐露旧事。"]},'
+                            '{"episode":4,"title":"真相逼近","summary":"旧案反噬，两人陷入更大危机。","beats":["危机逼近","关系受压"],"scene_list":["Scene 1: [夜] [室外] [后巷] - 两人遭遇阻截。"]},'
+                            '{"episode":5,"title":"并肩反击","summary":"李明与赵掌柜正式联手反击幕后势力。","beats":["达成同盟","主动出击"],"scene_list":["Scene 1: [夜] [室内] [江南茶馆] - 两人制定计划。"]},'
+                            '{"episode":6,"title":"雨停灯明","summary":"真相落定，两人完成关系收束。","beats":["揭开真相","关系落定"],"scene_list":["Scene 1: [清晨] [室内] [江南茶馆] - 风波结束后的对话。"]}'
+                            ']}'
+                        )
+                    )
+                )
+            ],
+            usage=None,
+        )
+
+        async def fake_create(*, model, messages):
+            prompt = messages[0]["content"]
+            if "全局蓝图（blueprint）" in prompt:
+                return blueprint_response
+            if "本次只允许生成这些集数：1, 2, 3, 4, 5, 6" in prompt:
+                return batch_response
+            raise AssertionError(f"Unexpected prompt: {prompt}")
+
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=AsyncMock(side_effect=fake_create))
+            )
+        )
+
+        async with self.session_factory() as session:
+            await repo.save_story(
+                session,
+                "story-outline-aliases",
+                {"idea": "test"},
+            )
+
+            with (
+                patch("app.services.story_llm._make_client", return_value=fake_client),
+                patch("app.services.story_llm.settings.outline_generation_concurrency", 1),
+            ):
+                result = await generate_outline(
+                    "story-outline-aliases",
+                    selected_setting="新的世界观设定",
+                    db=session,
+                    api_key="fake-key",
+                    provider="openai",
+                    model="gpt-test",
+                )
+
+            story = await repo.get_story(session, "story-outline-aliases")
+
+        self.assertEqual(result["characters"][0]["aliases"], ["赵掌柜"])
+        self.assertEqual(story["characters"][0]["aliases"], ["赵掌柜"])
+
 
 if __name__ == "__main__":
     unittest.main()

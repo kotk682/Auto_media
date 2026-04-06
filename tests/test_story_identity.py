@@ -152,6 +152,28 @@ class StoryIdentityTests(unittest.TestCase):
             "黑色短发，寡言谨慎",
         )
 
+    def test_normalize_story_record_preserves_character_aliases_and_titles_as_aliases(self):
+        normalized = normalize_story_record(
+            {
+                "characters": [
+                    {
+                        "id": "char_boss_zhao",
+                        "name": "Boss Zhao",
+                        "role": "support",
+                        "description": "middle-aged man",
+                        "aliases": ["赵掌柜", "老赵", "Boss Zhao"],
+                        "title": "掌柜",
+                        "titles": ["赵老板", "赵掌柜"],
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(
+            normalized["characters"][0]["aliases"],
+            ["赵掌柜", "老赵", "掌柜", "赵老板"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
