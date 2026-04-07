@@ -97,6 +97,9 @@ async def _extract_frame(video_path: str, output_path: str, *frame_args: str) ->
         raise FileNotFoundError(f"视频文件不存在: {video_path}")
 
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.unlink(missing_ok=True)
     ffmpeg_bin = resolve_media_binary("ffmpeg")
 
     cmd = [
@@ -121,6 +124,10 @@ async def _extract_frame(video_path: str, output_path: str, *frame_args: str) ->
         err_msg = stderr.decode(errors="replace")
         logger.error("FFmpeg 提取帧失败 (code %d): %s", proc.returncode, err_msg)
         raise RuntimeError(f"FFmpeg 提取帧失败: {err_msg}")
+
+    if not output_file.is_file() or output_file.stat().st_size <= 0:
+        logger.error("FFmpeg 提取帧未生成有效输出文件: %s", output_path)
+        raise RuntimeError(f"FFmpeg 提取帧未生成有效输出文件: {output_path}")
 
     logger.info("FFmpeg 提取单帧完成: %s", output_path)
     return output_path

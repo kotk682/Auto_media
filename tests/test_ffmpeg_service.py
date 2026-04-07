@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app.services.ffmpeg import _resolve_image_output_path, extract_last_frame, resolve_media_binary
+from app.services.ffmpeg import _extract_frame, _resolve_image_output_path, extract_last_frame, resolve_media_binary
 
 TMP_ROOT = Path(__file__).resolve().parents[1] / ".tmp" / "tests"
 TMP_ROOT.mkdir(parents=True, exist_ok=True)
@@ -80,3 +80,23 @@ class ExtractFramePathTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "media/images/scene1_shot1_lastframe.png")
         self.assertEqual(extract_mock.await_args.args[2:], ("-sseof", "-0.04"))
+
+    async def test_extract_frame_raises_when_ffmpeg_reports_success_but_output_is_missing(self):
+        class _FakeProc:
+            returncode = 0
+
+            async def communicate(self):
+                return b"", b""
+
+        with tempfile.TemporaryDirectory(dir=TMP_ROOT) as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            video_path = tmpdir_path / "input.mp4"
+            output_path = tmpdir_path / "frame.png"
+            video_path.write_bytes(b"fake-video")
+
+            with (
+                patch("app.services.ffmpeg.resolve_media_binary", return_value="/usr/bin/ffmpeg"),
+                patch("app.services.ffmpeg.asyncio.create_subprocess_exec", new=AsyncMock(return_value=_FakeProc())),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "未生成有效输出文件"):
+                    await _extract_frame(str(video_path), str(output_path))

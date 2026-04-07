@@ -1472,13 +1472,19 @@ async def generate_transition(
     )
 
     transition_id = f"transition_{req.from_shot_id}__{req.to_shot_id}"
-    base_url = str(request.base_url).rstrip("/")
-    from_video_path = url_to_local_path(from_video_url, base_url)
-    to_video_path = url_to_local_path(to_video_url, base_url)
+    request_base_url = str(request.base_url).rstrip("/")
+    provider_uses_local_frame_paths = video_config["video_provider"] == "doubao"
+    frame_base_url = "" if provider_uses_local_frame_paths else _resolve_public_base_url(request)
+    from_video_path = url_to_local_path(from_video_url, request_base_url)
+    to_video_path = url_to_local_path(to_video_url, request_base_url)
     from_frame_source_type = "video_frame"
     to_frame_source_type = "video_frame"
     from_frame_error = ""
     to_frame_error = ""
+    first_frame_input = ""
+    last_frame_input = ""
+    first_frame_exists: bool | None = None
+    last_frame_exists: bool | None = None
     try:
         try:
             from_frame_path = await ffmpeg.extract_last_frame(
@@ -1520,12 +1526,48 @@ async def generate_transition(
             to_frame_source_type = "storyboard_image_fallback"
             to_frame_error = str(exc)
 
+        non_local_frame_prefixes = ("data:", "http://", "https://")
+        first_frame_input = (
+            url_to_local_path(from_frame_url, request_base_url)
+            if provider_uses_local_frame_paths and not from_frame_url.startswith(non_local_frame_prefixes)
+            else _absolute_media_url(from_frame_url, frame_base_url)
+        )
+        last_frame_input = (
+            url_to_local_path(to_frame_url, request_base_url)
+            if provider_uses_local_frame_paths and not to_frame_url.startswith(non_local_frame_prefixes)
+            else _absolute_media_url(to_frame_url, frame_base_url)
+        )
+        if not first_frame_input.startswith(non_local_frame_prefixes):
+            first_frame_exists = Path(first_frame_input).is_file()
+        if not last_frame_input.startswith(non_local_frame_prefixes):
+            last_frame_exists = Path(last_frame_input).is_file()
+
+        logger.info(
+            "Transition frame inputs transition_id=%s provider=%s from_source=%s to_source=%s "
+            "from_video_path=%s to_video_path=%s first_frame_url=%r first_frame_input=%r first_frame_exists=%s "
+            "last_frame_url=%r last_frame_input=%r last_frame_exists=%s",
+            transition_id,
+            video_config["video_provider"],
+            from_frame_source_type,
+            to_frame_source_type,
+            from_video_path,
+            to_video_path,
+            from_frame_url,
+            first_frame_input,
+            first_frame_exists,
+            to_frame_url,
+            last_frame_input,
+            last_frame_exists,
+        )
+
         transition_video = await video.generate_transition_video(
             transition_id=transition_id,
             # Provider-side parameter names are fixed: first_frame is the ending frame of from_shot,
             # last_frame is the opening frame of to_shot for this transition bridge.
-            first_frame_url=_absolute_media_url(from_frame_url, base_url),
-            last_frame_url=_absolute_media_url(to_frame_url, base_url),
+            # Doubao handles MEDIA_DIR-backed local files directly, so pass the resolved
+            # filesystem path instead of a localhost-style URL during local development.
+            first_frame_url=first_frame_input,
+            last_frame_url=last_frame_input,
             prompt=transition_prompt,
             model=resolve_video_model(req.model or "", video_config["video_provider"]),
             video_api_key=video_config["video_api_key"],
@@ -1535,10 +1577,42 @@ async def generate_transition(
             duration_seconds=req.duration_seconds,
         )
     except FileNotFoundError as exc:
+        logger.warning(
+            "Transition file missing transition_id=%s provider=%s first_frame_input=%r first_frame_exists=%s "
+            "last_frame_input=%r last_frame_exists=%s error=%s",
+            transition_id,
+            video_config["video_provider"],
+            first_frame_input,
+            first_frame_exists,
+            last_frame_input,
+            last_frame_exists,
+            exc,
+        )
         raise HTTPException(status_code=400, detail=f"过渡视频生成失败，缺少本地素材文件: {exc}") from exc
     except RuntimeError as exc:
+        logger.exception(
+            "Transition runtime failure transition_id=%s provider=%s first_frame_input=%r first_frame_exists=%s "
+            "last_frame_input=%r last_frame_exists=%s",
+            transition_id,
+            video_config["video_provider"],
+            first_frame_input,
+            first_frame_exists,
+            last_frame_input,
+            last_frame_exists,
+        )
         raise HTTPException(status_code=500, detail=f"过渡视频生成失败: {exc}") from exc
     except ValueError as exc:
+        logger.warning(
+            "Transition validation failure transition_id=%s provider=%s first_frame_input=%r first_frame_exists=%s "
+            "last_frame_input=%r last_frame_exists=%s error=%s",
+            transition_id,
+            video_config["video_provider"],
+            first_frame_input,
+            first_frame_exists,
+            last_frame_input,
+            last_frame_exists,
+            exc,
+        )
         raise HTTPException(status_code=400, detail=f"过渡视频生成失败: {exc}") from exc
 
     first_frame_source = _build_transition_frame_source(

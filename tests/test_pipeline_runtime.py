@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.database import Base
 from app.core.api_keys import get_art_style
+from app.paths import MEDIA_DIR
 from app.core.story_script import serialize_story_to_script
 from app.core.story_context import build_generation_payload, build_story_context
 from app.core.pipeline_runtime import (
@@ -1998,13 +1999,15 @@ class ManualPipelineMainlineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("前后锚点都来自相邻主镜头视频抽帧", result.diagnostic_summary)
         self.assertEqual(extract_last_mock.await_args.kwargs["output_name"], "transition_scene1_shot1__scene1_shot2_from_last.png")
         self.assertEqual(extract_first_mock.await_args.kwargs["output_name"], "transition_scene1_shot1__scene1_shot2_to_first.png")
+        expected_first_frame_path = str((MEDIA_DIR / "images" / "transition_scene1_shot1__scene1_shot2_from_last.png").resolve(strict=False))
+        expected_last_frame_path = str((MEDIA_DIR / "images" / "transition_scene1_shot1__scene1_shot2_to_first.png").resolve(strict=False))
         self.assertEqual(
             generate_transition_mock.await_args.kwargs["first_frame_url"],
-            "http://testserver/media/images/transition_scene1_shot1__scene1_shot2_from_last.png",
+            expected_first_frame_path,
         )
         self.assertEqual(
             generate_transition_mock.await_args.kwargs["last_frame_url"],
-            "http://testserver/media/images/transition_scene1_shot1__scene1_shot2_to_first.png",
+            expected_last_frame_path,
         )
         self.assertEqual(generate_transition_mock.await_args.kwargs["duration_seconds"], 3)
         transition_prompt = generate_transition_mock.await_args.kwargs["prompt"]
@@ -2160,9 +2163,10 @@ class ManualPipelineMainlineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ffmpeg last frame failed", result.first_frame_source.extraction_error)
         self.assertEqual(result.last_frame_source.source_type, "video_frame")
         self.assertIn("前镜锚点当前回退到了分镜图", result.diagnostic_summary)
+        expected_storyboard_frame_path = str((MEDIA_DIR / "images" / "scene1_shot1.png").resolve(strict=False))
         self.assertEqual(
             generate_transition_mock.await_args.kwargs["first_frame_url"],
-            "http://testserver/media/images/scene1_shot1.png",
+            expected_storyboard_frame_path,
         )
 
     async def test_generate_transition_does_not_trust_request_video_urls(self):
